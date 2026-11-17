@@ -1,0 +1,162 @@
+<!doctype html>
+<html lang="pt-PT">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Syncrofin 3D Planner — camiões e contentores</title>
+<meta name="description" content="Planeador de carga em 3D: escolha o veículo, introduza a carga, coloque os volumes automaticamente e veja o aproveitamento de espaço, peso e área.">
+<meta name="color-scheme" content="light">
+<link rel="icon" href="favicon.svg" type="image/svg+xml">
+<link rel="alternate icon" href="favicon.ico" sizes="16x16">
+<link rel="stylesheet" href="assets/styles.css">
+</head>
+<body>
+
+<header class="topbar" id="topbar">
+  <div class="brand">
+    <span class="mark" aria-hidden="true"><span></span><span></span><span></span></span>
+    <span>Syncrofin <b>3D</b> Planner</span>
+  </div>
+
+  <button class="nav-toggle" id="nav-toggle" type="button" aria-label="Toggle navigation" aria-expanded="false" aria-controls="top-actions">
+    <span class="nav-bars" aria-hidden="true"><span></span><span></span><span></span></span>
+    <span class="sr-only">Toggle navigation</span>
+  </button>
+
+  <div class="vehicle-picker">
+    <label for="vehicle">Veículo</label>
+    <select id="vehicle"></select>
+  </div>
+
+  <div class="top-actions" id="top-actions">
+    <button class="btn ghost" id="demo" type="button">Carga de exemplo</button>
+    <button class="btn ghost" id="clear" type="button">Limpar</button>
+    <button class="btn primary" id="plan" type="button">Carregar</button>
+  </div>
+</header>
+
+<main class="workspace">
+
+  <aside class="panel" aria-label="Lista de carga">
+    <div class="panel-head">
+      <h1>Carga</h1>
+      <span class="pill" id="cargo-count">0 volumes</span>
+    </div>
+
+    <form class="item-form" id="item-form" autocomplete="off" novalidate>
+      <div class="field">
+        <label for="f-name">Descrição</label>
+        <input id="f-name" name="name" type="text" value="Caixa de cartão" maxlength="28" required>
+      </div>
+
+      <div class="field">
+        <label for="f-dest">Destino</label>
+        <input id="f-dest" name="dest" type="text" value="Grupo 1" maxlength="40" placeholder="Ex.: FruitPlanet Corp">
+      </div>
+
+      <div class="grid3">
+        <div class="field">
+          <label for="f-l">Comp. mm</label>
+          <input id="f-l" name="l" type="number" inputmode="numeric" min="50" max="13600" step="10" value="1200" required>
+        </div>
+        <div class="field">
+          <label for="f-w">Larg. mm</label>
+          <input id="f-w" name="w" type="number" inputmode="numeric" min="50" max="2450" step="10" value="800" required>
+        </div>
+        <div class="field">
+          <label for="f-h">Alt. mm</label>
+          <input id="f-h" name="h" type="number" inputmode="numeric" min="20" max="3000" step="10" value="1000" required>
+        </div>
+      </div>
+
+      <div class="grid3">
+        <div class="field">
+          <label for="f-weight">Peso kg</label>
+          <input id="f-weight" name="weight" type="number" inputmode="numeric" min="0" max="30000" step="1" value="120" required>
+        </div>
+        <div class="field">
+          <label for="f-qty">Unidades</label>
+          <input id="f-qty" name="qty" type="number" inputmode="numeric" min="1" max="500" step="1" value="10" required>
+        </div>
+        <div class="field">
+          <label for="f-color">Cor</label>
+          <select id="f-color" name="color">
+            <option value="blue">Azul</option>
+            <option value="yellow">Amarelo</option>
+            <option value="green">Verde</option>
+            <option value="orange">Laranja</option>
+            <option value="grey">Cinza</option>
+          </select>
+        </div>
+      </div>
+
+      <button class="btn dark" type="submit">Adicionar item</button>
+      <p class="form-msg" id="form-msg" role="status"></p>
+    </form>
+
+    <ul class="items" id="items"></ul>
+    <p class="empty" id="empty" hidden>
+      Ainda não há carga na lista. Adicione um volume acima ou experimente a carga de exemplo.
+    </p>
+  </aside>
+
+  <section class="stage" aria-label="Vista da carga">
+    <div class="stage-bar">
+      <nav class="seg" aria-label="Vistas da carga">
+        <button type="button" data-view="3d" class="on" aria-pressed="true">3D</button>
+        <button type="button" data-view="top" aria-pressed="false">Topo</button>
+        <button type="button" data-view="side" aria-pressed="false">Lado</button>
+        <button type="button" data-view="left" aria-pressed="false">Esq.</button>
+        <button type="button" data-view="right" aria-pressed="false">Dir.</button>
+      </nav>
+
+      <div class="gauges">
+        <div class="gauge" data-gauge="volume">
+          <span>Volume</span><span class="bar"><i></i></span><b>0%</b>
+        </div>
+        <div class="gauge" data-gauge="weight">
+          <span>Peso</span><span class="bar"><i></i></span><b>0%</b>
+        </div>
+        <div class="gauge" data-gauge="area">
+          <span>Chão</span><span class="bar"><i></i></span><b>0%</b>
+        </div>
+        <div class="gauge" data-gauge="linear">
+          <span>Linear</span><span class="bar"><i></i></span><b>0 m</b>
+        </div>
+      </div>
+    </div>
+
+    <div class="canvas-wrap">
+      <canvas id="view" role="img" aria-label="Vista tridimensional da carga colocada"></canvas>
+      <p class="hint-drag">Arraste para rodar · amplie com a roda ou com dois dedos</p>
+    </div>
+
+    <div class="stage-foot">
+      <span id="status">Pronto.</span>
+      <span id="vehicle-dims"></span>
+      <button class="btn line small" id="report" type="button">Relatório</button>
+    </div>
+
+    <div class="axle-panel" aria-label="Distribuição de peso por eixo">
+      <div class="axle-head">
+        <h2>Peso por eixo</h2>
+      </div>
+      <div class="axle-body">
+        <canvas id="axle-view" role="img" aria-label="Esquema lateral com os eixos e o centro de gravidade"></canvas>
+        <ul class="axle-list" id="axle-list"></ul>
+      </div>
+      <p class="axle-cog" id="axle-cog"></p>
+    </div>
+  </section>
+
+</main>
+
+<footer class="foot-note">
+  <span>Desenvolvido por Gustavo F. Landal - 2026 - gustavoflandal@gmail.com</span>
+  <span>Enter adiciona a caixa · Esc fecha o menu e limpa a seleção</span>
+  <span>Os planos ficam guardados só neste navegador.</span>
+</footer>
+
+<script src="assets/app.js"></script>
+</body>
+</html>

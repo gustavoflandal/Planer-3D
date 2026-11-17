@@ -1,0 +1,11 @@
+{
+  "name": "carga3d-planner",
+  "private": true,
+  "version": "1.0.0",
+  "type": "module",
+  "description": "A browser load planner for trucks and containers: cargo list, automatic 3D placement, space/weight/floor use. Builds to plain static files.",
+  "scripts": {
+    "build": "node build.mjs",
+    "check": "node --check src/app.js && node tools/smoke.mjs"
+  }
+}
