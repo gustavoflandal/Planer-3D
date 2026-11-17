@@ -14,6 +14,8 @@ const read = (rel) => fs.readFileSync(path.join(src, rel), 'utf8');
 const html = read('index.html');
 const css = read('styles.css');
 const js = read('app.js');
+const spacesJs = read('spaces.js');
+const spacesUiJs = read('spaces-ui.js');
 
 const written = [];
 const write = (rel, data) => {
@@ -26,6 +28,12 @@ const write = (rel, data) => {
 write('index.html', html);
 write('assets/styles.css', css);
 write('assets/app.js', js);
+write('assets/spaces.js', spacesJs);
+write('assets/spaces-ui.js', spacesUiJs);
+/* WebGL view and the Three.js build it imports (MIT, licence kept beside it) */
+write('assets/scene3d.js', read('scene3d.js'));
+write('assets/vendor/three.module.min.js', read('vendor/three.module.min.js'));
+write('assets/vendor/THREE-LICENSE.txt', read('vendor/THREE-LICENSE.txt'));
 
 /* --- icon -----------------------------------------------------------------
    Built here rather than kept as a binary asset: a dark tile with the three
@@ -210,9 +218,15 @@ for (const route of legacyRoutes) {
 
 /* --- small self-check: the page must point at files that were written ------ */
 const problems = [];
-for (const asset of ['assets/styles.css', 'assets/app.js', 'favicon.svg', 'favicon.ico']) {
+for (const asset of ['assets/styles.css', 'assets/spaces.js', 'assets/app.js', 'assets/spaces-ui.js', 'favicon.svg', 'favicon.ico']) {
   if (!html.includes(asset)) problems.push(`index.html does not link ${asset}`);
 }
+/* app.js reads the catalogue from spaces.js and spaces-ui.js reads the planner,
+   so the order of the three scripts matters. */
+const order = ['assets/spaces.js', 'assets/app.js', 'assets/spaces-ui.js'].map((a) => html.indexOf(a));
+if (!(order[0] < order[1] && order[1] < order[2])) problems.push('scripts must load as spaces.js, app.js, spaces-ui.js');
+if (!html.includes('<script type="module" src="assets/scene3d.js">')) problems.push('index.html does not load the WebGL view as a module');
+if (!read('scene3d.js').includes("from './vendor/three.module.min.js'")) problems.push('scene3d.js must import the bundled Three.js');
 for (const rel of written.map((w) => w.split(' ')[0])) {
   if (!fs.existsSync(path.join(dist, rel))) problems.push(`missing after write: ${rel}`);
 }

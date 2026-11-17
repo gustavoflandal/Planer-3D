@@ -6,9 +6,12 @@ import fs from 'node:fs';
 import vm from 'node:vm';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import zlib from 'node:zlib';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
-const source = fs.readFileSync(path.join(here, '..', 'src', 'app.js'), 'utf8');
+const srcFile = (name) => fs.readFileSync(path.join(here, '..', 'src', name), 'utf8');
+/* the page loads these three, in this order */
+const SCRIPTS = ['spaces.js', 'app.js', 'spaces-ui.js'];
 
 const log = { fills: 0, strokes: 0, moves: 0 };
 
@@ -90,8 +93,8 @@ function node(tag = 'div') {
 const ids = [
   '#view', '#axle-view', '#items', '#empty', '#cargo-count', '#item-form', '#form-msg',
   '#f-name', '#f-l', '#f-w', '#f-h', '#f-weight', '#f-qty', '#f-color', '#f-dest',
-  '#vehicle', '#plan', '#demo', '#clear', '#report', '#status', '#vehicle-dims',
-  '#axle-list', '#axle-cog', '#nav-toggle', '#topbar'
+  '#plan', '#demo', '#clear', '#report', '#status', '#vehicle-dims',
+  '#axle-list', '#axle-cog', '#nav-toggle', '#topbar', '#import', '#import-file', '#template'
 ];
 const elements = {};
 for (const id of ids) {
@@ -106,7 +109,6 @@ elements['#f-weight'].value = '150';
 elements['#f-qty'].value = '8';
 elements['#f-color'].value = 'blue';
 elements['#f-dest'].value = 'Grupo 1';
-elements['#vehicle'].value = '2';
 
 const viewButtons = ['3d', 'top', 'side', 'left', 'right'].map((v) => {
   const b = node('button');
@@ -149,22 +151,29 @@ const window = {
   ResizeObserver: null
 };
 
-const sandbox = { window, document, console, Math, JSON, parseInt, parseFloat, isFinite, Array, Object, String, Number };
+const sandbox = {
+  window, document, console, Math, JSON, parseInt, parseFloat, isFinite, Array, Object, String, Number,
+  TextDecoder, Blob, Response, DecompressionStream
+};
 sandbox.window.document = document;
 
-try {
-  vm.createContext(sandbox);
-  vm.runInContext(source, sandbox, { filename: 'app.js' });
-} catch (err) {
-  console.error('app.js threw: ' + (err && err.stack ? err.stack : err));
-  process.exit(1);
+vm.createContext(sandbox);
+for (const name of SCRIPTS) {
+  try {
+    vm.runInContext(srcFile(name), sandbox, { filename: name });
+  } catch (err) {
+    console.error(name + ' threw: ' + (err && err.stack ? err.stack : err));
+    process.exit(1);
+  }
 }
+const Spaces = window.SyncrofinSpaces;
 
 const checks = [];
 const canvas = elements['#view'];
 checks.push(['canvas sized', canvas.width > 0 && canvas.height > 0]);
 checks.push(['3D drawing happened', log.fills > 3 && log.strokes > 0]);
-checks.push(['vehicle select filled', elements['#vehicle'].children.length === 7]);
+checks.push(['catalogue loaded', Spaces.all().length === 17 && Spaces.cargoSpaces().length === 14 && Spaces.tractors().length === 3]);
+checks.push(['default is the semitrailer with a tractor', String(elements['#vehicle-dims'].textContent).startsWith('Semirreboque 13,6 m + Cavalo padrão')]);
 checks.push(['cargo rows rendered', elements['#items'].children.length > 0]);
 checks.push(['status written', String(elements['#status'].textContent).length > 5]);
 checks.push(['dimensions written', String(elements['#vehicle-dims'].textContent).includes('mm')]);
@@ -177,14 +186,19 @@ checks.push(['every demo box fitted', String(elements['#status'].textContent).in
 checks.push(['volume gauge above 20%', parseFloat(gauges[0].barFill.style.width) > 20]);
 
 /* The axle panel must mirror the lever rule: the loads on the axles add up to
-   the cargo's own weight, and the destination field must split the item list
-   into the groups the demo items declare. */
+   the cargo's own weight plus the tare of the semitrailer and its tractor (the
+   kingpin row only reports what the tractor already carries), and the
+   destination field must split the item list into the groups the demo items
+   declare. */
 const digits = (s) => parseInt(String(s).replace(/[^0-9]/g, '') || '0', 10);
-const axleLoads = elements['#axle-list'].children.map((li) => {
+const axleRows = elements['#axle-list'].children;
+const axleLoads = axleRows.filter((li) => !/\binfo\b/.test(li.className)).map((li) => {
   const val = li.children[2];
   return val ? digits(val.textContent) : 0;
 });
 const axleSum = axleLoads.reduce((a, b) => a + b, 0);
+const tareOf = (s) => s.axles.reduce((t, a) => t + a.tare, 0);
+const tare = tareOf(Spaces.get('semi')) + tareOf(Spaces.get('tractor42'));
 const cargoWeight = elements['#items'].children.reduce((sum, li) => {
   if (li.className !== 'item-row') return sum;
   const btn = li.children[0];
@@ -194,8 +208,9 @@ const cargoWeight = elements['#items'].children.reduce((sum, li) => {
   return sum + (parts[1] ? digits(parts[1]) : 0) * (parts[2] ? digits(parts[2]) : 0);
 }, 0);
 
-checks.push(['axle list written', axleLoads.length === 3]);
-checks.push(['axle loads sum to cargo weight', Math.abs(axleSum - cargoWeight) <= 3]);
+checks.push(['axle list: 2 tractor axles, kingpin, 3 trailer axles', axleRows.length === 6 && axleLoads.length === 5 &&
+  axleRows.filter((li) => /\binfo\b/.test(li.className)).length === 1]);
+checks.push(['axle loads sum to cargo + tare', Math.abs(axleSum - (cargoWeight + tare)) <= 6]);
 checks.push(['axle-cog written', String(elements['#axle-cog'].textContent).includes('Centro de gravidade')]);
 checks.push([
   'destination groups rendered',
@@ -220,6 +235,242 @@ checks.push(['menu button opens and closes', opened && closed]);
 toggle.fire('click');
 elements['#plan'].fire('click');
 checks.push(['planning closes the menu', !bar.classList.contains('menu-open')]);
+
+/* Spreadsheet import: numbers as Excel writes them in any locale, CSV with and
+   without a header, units in the header, and a real .xlsx workbook built here
+   with zlib, read back through the same path the browser uses. */
+const imp = window.SyncrofinImport;
+const semi = { name: 'Semirreboque 13,6 m', l: 13600, w: 2450, h: 2700 };
+const enc = (s) => new Uint8Array(Buffer.from(s, 'utf8'));
+
+function zip(files) {
+  const locals = [];
+  const central = [];
+  let offset = 0;
+  for (const [name, text] of Object.entries(files)) {
+    const raw = Buffer.from(text, 'utf8');
+    const data = zlib.deflateRawSync(raw);
+    const nameBuf = Buffer.from(name, 'utf8');
+    const crc = zlib.crc32 ? zlib.crc32(raw) : 0;
+    const lh = Buffer.alloc(30);
+    lh.writeUInt32LE(0x04034b50, 0); lh.writeUInt16LE(20, 4); lh.writeUInt16LE(8, 8);
+    lh.writeUInt32LE(crc, 14); lh.writeUInt32LE(data.length, 18); lh.writeUInt32LE(raw.length, 22);
+    lh.writeUInt16LE(nameBuf.length, 26);
+    const ch = Buffer.alloc(46);
+    ch.writeUInt32LE(0x02014b50, 0); ch.writeUInt16LE(20, 4); ch.writeUInt16LE(20, 6); ch.writeUInt16LE(8, 10);
+    ch.writeUInt32LE(crc, 16); ch.writeUInt32LE(data.length, 20); ch.writeUInt32LE(raw.length, 24);
+    ch.writeUInt16LE(nameBuf.length, 28); ch.writeUInt32LE(offset, 42);
+    locals.push(lh, nameBuf, data);
+    central.push(ch, nameBuf);
+    offset += 30 + nameBuf.length + data.length;
+  }
+  const cd = Buffer.concat(central);
+  const end = Buffer.alloc(22);
+  end.writeUInt32LE(0x06054b50, 0);
+  end.writeUInt16LE(Object.keys(files).length, 8); end.writeUInt16LE(Object.keys(files).length, 10);
+  end.writeUInt32LE(cd.length, 12); end.writeUInt32LE(offset, 16);
+  return new Uint8Array(Buffer.concat([...locals, cd, end]));
+}
+
+const xlsx = zip({
+  '[Content_Types].xml': '<?xml version="1.0"?><Types/>',
+  'xl/workbook.xml': '<workbook xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"><sheets><sheet name="Carga" sheetId="1" r:id="rId7"/></sheets></workbook>',
+  'xl/_rels/workbook.xml.rels': '<Relationships><Relationship Id="rId7" Type="worksheet" Target="worksheets/folha.xml"/></Relationships>',
+  'xl/sharedStrings.xml': '<sst><si><t>Descrição</t></si><si><t>Comprimento (mm)</t></si><si><t>Largura (mm)</t></si><si><t>Altura (mm)</t></si><si><t>Peso (kg)</t></si><si><t>Quantidade</t></si><si><t>Destino</t></si><si><r><t xml:space="preserve">Palete </t></r><r><t>EUR &amp; Cia</t></r></si><si><t>Loja Norte</t></si></sst>',
+  'xl/worksheets/folha.xml': '<worksheet><sheetData>' +
+    '<row r="1"><c r="A1" t="s"><v>0</v></c><c r="B1" t="s"><v>1</v></c><c r="C1" t="s"><v>2</v></c><c r="D1" t="s"><v>3</v></c><c r="E1" t="s"><v>4</v></c><c r="F1" t="s"><v>5</v></c><c r="G1" t="s"><v>6</v></c></row>' +
+    '<row r="2"><c r="A2" t="s"><v>7</v></c><c r="B2"><v>1200</v></c><c r="C2"><v>800</v></c><c r="D2"><v>1450</v></c><c r="E2"><v>420.5</v></c><c r="F2"><v>12</v></c><c r="G2" t="s"><v>8</v></c></row>' +
+    '<row r="4"><c r="A4" t="inlineStr"><is><t>Caixa</t></is></c><c r="B4"><v>600</v></c><c r="C4"><v>400</v></c><c r="D4"><v>400</v></c><c r="F4"><v>20</v></c></row>' +
+    '<row r="5"><c r="A5" t="inlineStr"><is><t>Sem medidas</t></is></c></row>' +
+    '</sheetData></worksheet>'
+});
+
+async function importChecks() {
+  const out = [];
+  out.push(['numbers: 1.200,5', imp.parseNumber('1.200,5') === 1200.5]);
+  out.push(['numbers: 1,200.5', imp.parseNumber('1,200.5') === 1200.5]);
+  out.push(['numbers: 1.200 and 12,5', imp.parseNumber('1.200') === 1200 && imp.parseNumber('12,5') === 12.5]);
+  out.push(['numbers: 120 kg', imp.parseNumber('120 kg') === 120]);
+
+  const csv = 'Descrição;Comprimento (cm);Largura (cm);Altura (cm);Peso total (kg);Qtd;Destino;Cor\r\n' +
+    '"Caixa ""A""' + '";120;80;100;1.200,5;10;Loja 1;verde\r\n;;;;\r\nGrande;9999;80;100;1;1;;\r\n';
+  const r1 = imp.rowsToItems(await imp.readSpreadsheet(enc(csv)), semi);
+  const a = r1.items[0] || {};
+  out.push(['csv: header, cm and total weight', r1.items.length === 1 && a.name === 'Caixa "A"' && a.l === 1200 &&
+    a.w === 800 && a.h === 1000 && Math.abs(a.weight - 120.05) < 0.06 && a.qty === 10 && a.dest === 'Loja 1' && a.color === 'green']);
+  out.push(['csv: oversize row skipped with its line', r1.skipped.length === 1 && r1.skipped[0].line === 4 && /não cabe/.test(r1.skipped[0].reason)]);
+
+  const r2 = imp.rowsToItems(await imp.readSpreadsheet(enc('Palete,1200,800,1450,420,12\nCaixa,600,400,400,35,20\n')), semi);
+  out.push(['csv: no header, positional', r2.items.length === 2 && r2.items[0].name === 'Palete' && r2.items[0].qty === 12 &&
+    r2.items[1].l === 600 && r2.items[1].weight === 35 && r2.items[1].qty === 20]);
+  const r2b = imp.rowsToItems(await imp.readSpreadsheet(enc('1000;600;500;50;3\n')), semi);
+  out.push(['csv: no header, no description', r2b.items.length === 1 && r2b.items[0].l === 1000 &&
+    r2b.items[0].qty === 3 && r2b.items[0].name === 'Volume 1']);
+
+  const r3 = imp.rowsToItems(await imp.readSpreadsheet(enc('L;W;H;Qty\n1200;800;1000;2\n')), semi);
+  out.push(['csv: L W H header', r3.items.length === 1 && r3.items[0].l === 1200 && r3.items[0].w === 800]);
+  const r4 = imp.rowsToItems(await imp.readSpreadsheet(enc('C;L;A\n1200;800;1000\n')), semi);
+  out.push(['csv: C L A header', r4.items.length === 1 && r4.items[0].l === 1200 && r4.items[0].w === 800]);
+
+  const ansi = new Uint8Array([...Buffer.from('Descri', 'latin1'), 0xe7, 0xe3, ...Buffer.from('o;Comp;Larg;Alt\nCal', 'latin1'), 0xe7, ...Buffer.from('ado;500;400;300\n', 'latin1')]);
+  const r6 = imp.rowsToItems(await imp.readSpreadsheet(ansi), semi);
+  out.push(['csv: Windows-1252 accents', r6.items.length === 1 && r6.items[0].name === 'Calçado']);
+
+  const rows = await imp.readSpreadsheet(xlsx);
+  const r5 = imp.rowsToItems(rows, semi);
+  const x = r5.items[0] || {};
+  out.push(['xlsx: shared, rich and inline strings', r5.items.length === 2 && x.name === 'Palete EUR & Cia' &&
+    x.l === 1200 && x.h === 1450 && x.weight === 420.5 && x.qty === 12 && x.dest === 'Loja Norte' &&
+    r5.items[1].name === 'Caixa' && r5.items[1].qty === 20]);
+  out.push(['xlsx: row without sizes skipped as line 5', r5.skipped.length === 1 && r5.skipped[0].line === 5]);
+
+  const tpl = imp.rowsToItems(await imp.readSpreadsheet(enc('﻿' + imp.templateCsv())), semi);
+  out.push(['template CSV imports back as the demo', tpl.items.length === 4 && !tpl.skipped.length &&
+    tpl.items[0].name === 'Palete EUR' && tpl.items[0].color === 'blue' && tpl.items[3].color === 'orange' &&
+    tpl.items[0].dest === 'FruitPlanet Corp']);
+
+  let oldXls = '';
+  await imp.readSpreadsheet(new Uint8Array([0xd0, 0xcf, 0x11, 0xe0, 0, 0])).catch((e) => { oldXls = e.message; });
+  out.push(['old .xls refused with advice', /\.xlsx ou \.csv/.test(oldXls)]);
+
+  /* the button path: choosing a file adds its rows to the list */
+  const before = elements['#items'].children.length;
+  const fileInput = elements['#import-file'];
+  fileInput.files = [{ name: 'carga.xlsx', size: xlsx.length, arrayBuffer: async () => xlsx.buffer.slice(xlsx.byteOffset, xlsx.byteOffset + xlsx.length) }];
+  fileInput.fire('change');
+  for (let i = 0; i < 50 && !/Importados/.test(elements['#form-msg'].textContent); i++) await new Promise((r) => setTimeout(r, 10));
+  out.push(['import button adds the rows', elements['#items'].children.length > before && /Importados 2 itens/.test(elements['#form-msg'].textContent)]);
+  out.push(['import message is marked as success', elements['#form-msg'].classList.contains('ok')]);
+  return out;
+}
+
+/* Cargo spaces: catalogue, validation, saving, favourites and the axle
+   arithmetic, on a storage of their own so the planner's is left alone. */
+function spaceChecks() {
+  const out = [];
+  const mem = new Map();
+  const fakeStore = { getItem: (k) => (mem.has(k) ? mem.get(k) : null), setItem: (k, v) => mem.set(k, String(v)) };
+  Spaces.useStorage(fakeStore);
+
+  out.push(['16 space types', Spaces.TYPES.length === 16]);
+  out.push(['4-axle types: semitrailer, bitruck, tractor', ['semi4', 'lorry4', 'truck4'].every((id) => Spaces.typeOf(id))]);
+  out.push(['roles: semitrailer with 4 axles runs A to E', Spaces.roles('semi4').map((r) => r.letter).join('') === 'ABCDE']);
+  out.push(['roles: bitruck steers on A and B', Spaces.roles('lorry4').map((r) => r.group).join() === 'front,front,rear,rear' &&
+    Spaces.roles('lorry4')[1].label === 'Eixo dianteiro 2']);
+  out.push(['roles: semitrailer A is the kingpin', Spaces.roles('semi3').map((r) => r.letter + r.role).join() === 'Akingpin,Baxle,Caxle,Daxle']);
+
+  const blankErrors = Spaces.validate(Spaces.blank('semi3'));
+  out.push(['blank form lists what is missing', blankErrors.some((e) => e.field === 'name') && blankErrors.some((e) => e.field === 'l') &&
+    blankErrors.some((e) => e.field === 'axle3.max')]);
+
+  const good = {
+    name: 'Semirreboque 135', type: 'semi3', l: 13620, w: 2480, h: 2710, payload: 24000, track: 2050,
+    axles: [{ dist: 1675, tare: 1270, max: 12000 }, { dist: 7985, tare: 2004, max: 10000 },
+      { dist: 9295, tare: 1660, max: 10000 }, { dist: 10605, tare: 1416, max: 10000 }]
+  };
+  out.push(['valid space passes', Spaces.validate(Spaces.clean(good)).length === 0]);
+  const swapped = JSON.parse(JSON.stringify(good));
+  swapped.axles[2].dist = 7000;
+  out.push(['axles out of order refused', Spaces.validate(Spaces.clean(swapped)).some((e) => e.field === 'axle2.dist')]);
+  const tractorBad = { name: 'T', type: 'truck2', payload: 18000, track: 2050, axles: [{ dist: 500, tare: 5000, max: 8000 }, { dist: 900, tare: 2500, max: 11500 }] };
+  out.push(['tractor front axle must be ahead of the fifth wheel', Spaces.validate(Spaces.clean(tractorBad)).some((e) => e.field === 'axle0.dist')]);
+
+  const saved = Spaces.save(good);
+  out.push(['custom space saved', saved.ok && saved.space.origin === 'custom' && /^\d{4}-\d{2}-\d{2}$/.test(saved.space.created) &&
+    Spaces.all().length === 18]);
+  const id = saved.space.id;
+  out.push(['custom space persisted', JSON.parse(mem.get('syncrofin.spaces.v1')).custom.length === 1]);
+
+  out.push(['type filter: containers', Spaces.filter(Spaces.cargoSpaces(), { groups: ['container'] }).length === 3]);
+  out.push(['type filter: lorries + trailers', Spaces.filter(Spaces.cargoSpaces(), { groups: ['lorry', 'trailer'] }).length === 12]);
+  Spaces.toggleFavorite(id);
+  out.push(['favourites filter', Spaces.filter(Spaces.cargoSpaces(), { favoritesOnly: true }).map((s) => s.id).sort().join() === [id, 'semi'].sort().join()]);
+
+  const edited = Spaces.get('ct20');
+  edited.payload = 21000;
+  edited.id = 'ct20';
+  Spaces.save(edited);
+  out.push(['built-in space edited in place', Spaces.get('ct20').payload === 21000 && Spaces.get('ct20').edited && Spaces.get('ct20').origin === 'system']);
+  out.push(['built-in space reset', Spaces.reset('ct20') && Spaces.get('ct20').payload === 28000 && !Spaces.get('ct20').edited]);
+  out.push(['built-in space cannot be deleted', Spaces.remove('ct20') === false && !!Spaces.get('ct20')]);
+
+  /* reload from storage: same custom space and favourite */
+  Spaces.useStorage(fakeStore);
+  out.push(['custom space and favourite survive a reload', !!Spaces.get(id) && Spaces.isFavorite(id)]);
+  out.push(['custom space deleted', Spaces.remove(id) && !Spaces.get(id) && !Spaces.isFavorite(id)]);
+
+  /* axle loads */
+  const semi = Spaces.get('semi');
+  const tractor = Spaces.get('tractor42');
+  const onKingpin = Spaces.axleLoads(semi, null, { weight: 10000, cgx: semi.axles[0].dist, cgz: semi.w / 2 });
+  out.push(['cargo over the kingpin rests on the kingpin', Math.abs(onKingpin.kingpin.load - (10000 + semi.axles[0].tare)) < 1 &&
+    onKingpin.rows.filter((r) => r.part === 'space').every((r) => Math.abs(r.cargo) < 1)]);
+  const groupX = (semi.axles[1].dist + semi.axles[2].dist + semi.axles[3].dist) / 3;
+  const onGroup = Spaces.axleLoads(semi, null, { weight: 9000, cgx: groupX, cgz: semi.w / 2 });
+  out.push(['cargo over the axle group is shared by its axles', Math.abs(onGroup.kingpin.cargo) < 1 &&
+    onGroup.rows.filter((r) => r.part === 'space').every((r) => Math.abs(r.cargo - 3000) < 1)]);
+  const withTractor = Spaces.axleLoads(semi, tractor, { weight: 12000, cgx: 5000, cgz: semi.w / 2 });
+  const tRows = withTractor.rows.filter((r) => r.part === 'tractor');
+  const tSum = tRows.reduce((t, r) => t + r.load, 0);
+  out.push(['tractor axles carry the kingpin load plus their tare', tRows.length === 2 &&
+    Math.abs(tSum - (withTractor.kingpin.load + tareOf(tractor))) < 1 && withTractor.kingpin.info === true]);
+  const lean = Spaces.axleLoads(semi, null, { weight: 8000, cgx: 6000, cgz: semi.w / 2 - 300 });
+  out.push(['cargo leaning left loads the left wheels', lean.leftShare > 0.6 && lean.rows.every((r) => r.left >= r.right)]);
+  const lorry = Spaces.get('rigid');
+  const lorryFront = Spaces.axleLoads(lorry, null, { weight: 2000, cgx: lorry.axles[0].dist, cgz: lorry.w / 2 });
+  out.push(['lorry: cargo over the front axle', Math.abs(lorryFront.rows[0].cargo - 2000) < 1 && Math.abs(lorryFront.rows[1].cargo) < 1]);
+  /* 4-axle types */
+  const bitruck = Spaces.get('bitruck');
+  const frontMid = (bitruck.axles[0].dist + bitruck.axles[1].dist) / 2;
+  const bt = Spaces.axleLoads(bitruck, null, { weight: 6000, cgx: frontMid, cgz: bitruck.w / 2 });
+  out.push(['bitruck: cargo over the steering pair is shared by A and B', bt.rows.length === 4 &&
+    Math.abs(bt.rows[0].cargo - 3000) < 1 && Math.abs(bt.rows[1].cargo - 3000) < 1 && Math.abs(bt.rows[2].cargo) < 1]);
+  const semi4 = Spaces.get('semi4ax');
+  const s4 = Spaces.axleLoads(semi4, null, { weight: 20000, cgx: 8000, cgz: semi4.w / 2 });
+  out.push(['4-axle semitrailer: kingpin + 4 axles carry cargo + tare', s4.rows.length === 5 &&
+    Math.abs(s4.rows.reduce((t, r) => t + r.load, 0) - (20000 + tareOf(semi4))) < 1]);
+  const t84 = Spaces.get('tractor84');
+  const s4t = Spaces.axleLoads(semi4, t84, { weight: 20000, cgx: 8000, cgz: semi4.w / 2 });
+  const t84Rows = s4t.rows.filter((r) => r.part === 'tractor');
+  out.push(['4-axle tractor carries the kingpin on its 4 axles', t84Rows.length === 4 &&
+    Math.abs(t84Rows.reduce((t, r) => t + r.load, 0) - (s4t.kingpin.load + tareOf(t84))) < 1 &&
+    Math.abs(t84Rows[0].cargo - t84Rows[1].cargo) < 1 && Math.abs(t84Rows[2].cargo - t84Rows[3].cargo) < 1]);
+  const t84bad = JSON.parse(JSON.stringify(t84));
+  t84bad.axles[1].dist = 200;
+  out.push(['4-axle tractor: second steering axle must be ahead of the fifth wheel',
+    Spaces.validate(Spaces.clean(t84bad)).some((e) => e.field === 'axle1.dist')]);
+  out.push(['built-in 4-axle spaces are valid', ['bitruck', 'semi4ax', 'tractor84'].every((id) => Spaces.validate(Spaces.get(id)).length === 0)]);
+
+  out.push(['container has no axles of its own', Spaces.axleLoads(Spaces.get('ct40'), null, { weight: 5000, cgx: 3000, cgz: 1000 }).rows.length === 0]);
+  return out;
+}
+
+let importResults = [];
+try {
+  importResults = await importChecks();
+} catch (err) {
+  importResults = [['import checks ran: ' + (err && err.stack ? err.stack : err), false]];
+}
+checks.push(...importResults);
+try {
+  checks.push(...spaceChecks());
+} catch (err) {
+  checks.push(['space checks ran: ' + (err && err.stack ? err.stack : err), false]);
+}
+
+/* A plan saved before cargo spaces existed kept the vehicle as an index into
+   the old fixed list (4 = 20 ft container): it must open on the same space. */
+{
+  store.clear();
+  store.set('carga3d.v1', JSON.stringify({ vehicle: 4, items: [{ id: 1, name: 'Caixa', l: 1000, w: 800, h: 600, weight: 50, qty: 4, color: 'blue', dest: '' }] }));
+  const sb2 = { ...sandbox, window: { ...window, localStorage: window.localStorage } };
+  sb2.window.document = document;
+  vm.createContext(sb2);
+  for (const name of SCRIPTS) vm.runInContext(srcFile(name), sb2, { filename: name });
+  checks.push(['old saved plan opens on the same vehicle', String(elements['#vehicle-dims'].textContent).startsWith('Contentor 20 pés ·')]);
+  checks.push(['container shows no axle loads', elements['#axle-list'].children.length === 1 &&
+    elements['#axle-list'].children[0].className === 'axle-none']);
+}
 
 let failed = 0;
 for (const [name, ok] of checks) {
