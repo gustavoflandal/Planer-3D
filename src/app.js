@@ -6,16 +6,11 @@
 (function () {
   'use strict';
 
-  /* ------------------------------------------------------------- vehicles --- */
-  var VEHICLES = [
-    { id: 'van', name: 'Furgão 3,5 t', l: 6000, w: 2100, h: 2300, payload: 1200, axles: [{ x: 1400, limit: 1600 }, { x: 4800, limit: 2400 }] },
-    { id: 'rigid', name: 'Camião rígido 7,5 t', l: 7500, w: 2400, h: 2500, payload: 3500, axles: [{ x: 1300, limit: 2800 }, { x: 6400, limit: 5200 }] },
-    { id: 'semi', name: 'Semirreboque 13,6 m', l: 13600, w: 2450, h: 2700, payload: 24000, axles: [{ x: 1000, limit: 8000 }, { x: 4500, limit: 13000 }, { x: 11800, limit: 19000 }] },
-    { id: 'mega', name: 'Semirreboque mega', l: 13600, w: 2450, h: 3000, payload: 24000, axles: [{ x: 1000, limit: 8000 }, { x: 4500, limit: 13000 }, { x: 11800, limit: 19000 }] },
-    { id: 'ct20', name: 'Contentor 20 pés', l: 5900, w: 2350, h: 2390, payload: 28000, axles: [{ x: 800, limit: 11000 }, { x: 4500, limit: 19000 }] },
-    { id: 'ct40', name: 'Contentor 40 pés', l: 12030, w: 2350, h: 2390, payload: 26500, axles: [{ x: 900, limit: 10500 }, { x: 10500, limit: 18500 }] },
-    { id: 'ct40hc', name: 'Contentor 40 pés High Cube', l: 12030, w: 2350, h: 2690, payload: 26500, axles: [{ x: 900, limit: 10500 }, { x: 10500, limit: 18500 }] }
-  ];
+  /* --------------------------------------------------------- cargo spaces --- */
+  /* The vehicles and containers live in spaces.js (window.SyncrofinSpaces):
+     the built-in catalogue, the user's own spaces, favourites and the axle
+     arithmetic. */
+  var Spaces = window.SyncrofinSpaces;
 
   var PALETTE = {
     blue: '#5fc2ea',
@@ -36,18 +31,35 @@
 
   /* ---------------------------------------------------------------- state --- */
   var state = {
-    vehicleIndex: 2,
+    spaceId: Spaces.DEFAULT_SPACE,
+    tractorId: Spaces.DEFAULT_TRACTOR, /* '' = semitrailer without a tractor */
     items: [],
     placed: [],
     unplaced: [],
     totals: { count: 0, volume: 0, weight: 0, area: 0 },
     selected: null,
-    view: { az: 0.95, elev: 0.42, zoom: 1 }
+    view: { az: -2.3, elev: 0.4, zoom: 1 }
   };
 
   var els = {};
   var ctx = null;
   var nextId = 1;
+  var sceneDirty = true; /* the WebGL scene needs rebuilding (a new plan) */
+
+  /* What the WebGL view needs to build its scene. */
+  function sceneData() {
+    var names = {};
+    state.items.forEach(function (it) {
+      names[it.id] = it.name;
+    });
+    return {
+      space: currentVehicle(),
+      tractor: currentTractor(),
+      placed: state.placed,
+      names: names,
+      palette: PALETTE
+    };
+  }
 
   /* -------------------------------------------------------------- helpers --- */
   function $(sel) {
@@ -68,8 +80,23 @@
     return n.toLocaleString('pt-PT', { minimumFractionDigits: d, maximumFractionDigits: d });
   }
 
+  function fmtWeight(kg) {
+    /* whole kilos as before; imported weights keep the decimals they had */
+    var d = Math.abs(kg - Math.round(kg)) < 0.005 ? 0 : Math.abs(kg * 10 - Math.round(kg * 10)) < 0.05 ? 1 : 2;
+    return fmt(kg, d);
+  }
+
   function currentVehicle() {
-    return VEHICLES[state.vehicleIndex] || VEHICLES[0];
+    var s = Spaces.get(state.spaceId);
+    if (!s || Spaces.isTractor(s)) s = Spaces.get(Spaces.DEFAULT_SPACE);
+    return s;
+  }
+
+  /* The tractor unit pulling the chosen semitrailer, or null. */
+  function currentTractor() {
+    if (!Spaces.takesTractor(currentVehicle()) || !state.tractorId) return null;
+    var t = Spaces.get(state.tractorId);
+    return t && Spaces.isTractor(t) ? t : null;
   }
 
   function rgb(hex) {
@@ -82,7 +109,7 @@
     try {
       window.localStorage.setItem(
         STORE_KEY,
-        JSON.stringify({ vehicle: state.vehicleIndex, items: state.items })
+        JSON.stringify({ space: state.spaceId, tractor: state.tractorId, items: state.items })
       );
     } catch (e) {
       /* private mode: the planner still works, it just forgets on reload */
@@ -95,7 +122,15 @@
       if (!raw) return false;
       var data = JSON.parse(raw);
       if (!data || !Array.isArray(data.items)) return false;
-      state.vehicleIndex = clamp(num(data.vehicle, 2), 0, VEHICLES.length - 1);
+      if (typeof data.space === 'string') {
+        state.spaceId = data.space;
+        state.tractorId = typeof data.tractor === 'string' ? data.tractor : Spaces.DEFAULT_TRACTOR;
+      } else {
+        /* saved before cargo spaces: the vehicle was an index into a fixed list */
+        var legacy = Spaces.LEGACY_ORDER[clamp(Math.round(num(data.vehicle, 2)), 0, Spaces.LEGACY_ORDER.length - 1)];
+        state.spaceId = legacy || Spaces.DEFAULT_SPACE;
+      }
+      if (!Spaces.get(state.spaceId)) state.spaceId = Spaces.DEFAULT_SPACE;
       state.items = data.items
         .filter(function (it) {
           return it && typeof it.name === 'string';
@@ -104,9 +139,9 @@
           return {
             id: it.id || nextId++,
             name: String(it.name).slice(0, 28),
-            l: clamp(num(it.l, 1200), 50, 13600),
-            w: clamp(num(it.w, 800), 50, 2450),
-            h: clamp(num(it.h, 1000), 20, 3000),
+            l: clamp(num(it.l, 1200), 50, Spaces.LIMITS.l[1]),
+            w: clamp(num(it.w, 800), 50, Spaces.LIMITS.w[1]),
+            h: clamp(num(it.h, 1000), 20, Spaces.LIMITS.h[1]),
             weight: clamp(num(it.weight, 100), 0, 30000),
             qty: clamp(Math.round(num(it.qty, 1)), 1, 500),
             color: PALETTE[it.color] ? it.color : 'blue',
@@ -301,7 +336,9 @@
     var area = 0;
     placed.forEach(function (b) {
       volume += (b.l * b.w * b.h) / 1e9;
-      area += (b.l * b.w) / 1e6;
+      /* floor used: only what stands on the floor (stacked boxes sit on others,
+         and counting them pushed the gauge past 100%) */
+      if (b.y < 0.5) area += (b.l * b.w) / 1e6;
     });
     return {
       placed: placed,
@@ -474,6 +511,22 @@
 
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
     ctx.clearRect(0, 0, W, H);
+
+    /* WebGL view (scene3d.js) when the browser has it: this canvas then stays
+       clear, on top, for the pointer and the description. */
+    var gl = window.SyncrofinScene;
+    if (gl && gl.active) {
+      if (sceneDirty) {
+        gl.update(sceneData());
+        sceneDirty = false;
+      }
+      gl.render(state.view, state.selected);
+      canvas.setAttribute(
+        'aria-label',
+        'Vista tridimensional de ' + currentVehicle().name + ' com ' + state.totals.count + ' volumes colocados.'
+      );
+      return;
+    }
 
     var bg = ctx.createLinearGradient(0, 0, 0, H);
     bg.addColorStop(0, '#f8fafc');
@@ -667,8 +720,10 @@
         'Tudo colocado: ' + t.count + ' volumes, ' + fmt(t.volume, 1) + ' m³ de carga.';
     }
 
+    var tractor = currentTractor();
     els.dims.textContent =
       v.name +
+      (tractor ? ' + ' + tractor.name : '') +
       ' · ' +
       fmt(v.l) +
       ' × ' +
@@ -735,7 +790,7 @@
         var meta = document.createElement('span');
         meta.className = 'item-meta';
         meta.textContent =
-          fmt(it.l) + ' × ' + fmt(it.w) + ' × ' + fmt(it.h) + ' mm · ' + it.qty + ' un · ' + fmt(it.weight) + ' kg';
+          fmt(it.l) + ' × ' + fmt(it.w) + ' × ' + fmt(it.h) + ' mm · ' + it.qty + ' un · ' + fmtWeight(it.weight) + ' kg';
         text.appendChild(name);
         text.appendChild(meta);
 
@@ -762,66 +817,39 @@
     els.count.textContent = units + (units === 1 ? ' volume' : ' volumes');
   }
 
+  /* Centre of gravity of the placed cargo, then the load on every support:
+     the space's own axles, its kingpin and, for a semitrailer, the axles of
+     the tractor that carries the kingpin. Loads include the tare weights. */
   function computeAxles(vehicle, placed) {
-    var axles = (vehicle.axles || []).slice().sort(function (a, b) {
-      return a.x - b.x;
-    });
-    var loads = axles.map(function () {
-      return 0;
-    });
     var cgx = 0;
     var cgz = 0;
     var totalW = 0;
-
     placed.forEach(function (box) {
       var w = box.weight || 0;
-      var cx = box.x + box.l / 2;
-      var cz = box.z + box.w / 2;
-      cgx += w * cx;
-      cgz += w * cz;
+      cgx += w * (box.x + box.l / 2);
+      cgz += w * (box.z + box.w / 2);
       totalW += w;
-
-      if (!axles.length) return;
-      if (cx <= axles[0].x) {
-        loads[0] += w;
-      } else if (cx >= axles[axles.length - 1].x) {
-        loads[axles.length - 1] += w;
-      } else {
-        for (var i = 0; i < axles.length - 1; i++) {
-          if (cx >= axles[i].x && cx <= axles[i + 1].x) {
-            var span = axles[i + 1].x - axles[i].x;
-            if (span <= 0) {
-              loads[i] += w / 2;
-              loads[i + 1] += w / 2;
-            } else {
-              loads[i] += (w * (axles[i + 1].x - cx)) / span;
-              loads[i + 1] += (w * (cx - axles[i].x)) / span;
-            }
-            break;
-          }
-        }
-      }
     });
-
-    return {
-      axles: axles,
-      loads: loads,
-      cgx: totalW ? cgx / totalW : 0,
-      cgz: totalW ? cgz / totalW : 0,
-      totalW: totalW
+    var cargo = {
+      weight: totalW,
+      cgx: totalW ? cgx / totalW : vehicle.l / 2,
+      cgz: totalW ? cgz / totalW : vehicle.w / 2
     };
+    var res = Spaces.axleLoads(vehicle, currentTractor(), cargo);
+    res.cgx = cargo.cgx;
+    res.cgz = cargo.cgz;
+    res.totalW = totalW;
+    return res;
   }
 
-  function axleStatus(ratio) {
-    if (ratio > 1) return 'over';
-    if (ratio > 0.9) return 'warn';
-    return 'ok';
-  }
+  var AXLE_COLORS = { over: '#d64545', warn: '#e4a934', ok: '#5f9e54' };
 
   function drawAxle(res) {
     var cv = els.axleCanvas;
     if (!cv) return;
     var vehicle = currentVehicle();
+    var tractor = currentTractor();
+    var kind = (Spaces.typeOf(vehicle.type) || {}).kind;
     var dpr = window.devicePixelRatio || 1;
     var cssW = cv.clientWidth || (cv.parentNode && cv.parentNode.clientWidth) || 720;
     var cssH = 170;
@@ -832,27 +860,71 @@
     ac.setTransform(dpr, 0, 0, dpr, 0, 0);
     ac.clearRect(0, 0, cssW, cssH);
 
-    var padL = 46;
+    /* The drawing spans the cargo space and whatever sits ahead of it: a
+       lorry's cab over its front axle, or the tractor pulling a semitrailer. */
+    var minX = 0;
+    var maxX = vehicle.l;
+    res.rows.forEach(function (r) {
+      minX = Math.min(minX, r.x);
+      maxX = Math.max(maxX, r.x);
+    });
+    var cabFront = 0;
+    if (kind === 'lorry' || tractor) cabFront = Math.min(minX - 700, -1700);
+    minX = Math.min(minX, cabFront);
+    if (maxX > vehicle.l) maxX += 400;
+
+    var padL = minX < 0 ? 16 : 46;
     var padR = 12;
     var padT = 16;
     var padB = 46;
     var plotW = cssW - padL - padR;
     var plotH = cssH - padT - padB;
-    var vL = vehicle.l;
     var vH = vehicle.h;
-    var sx = plotW / vL;
+    var sx = plotW / (maxX - minX);
     var sy = plotH / vH;
 
     function X(mm) {
-      return padL + mm * sx;
+      return padL + (mm - minX) * sx;
     }
     function Y(mm) {
       return padT + (vH - mm) * sy;
     }
 
+    var floorY = padT + plotH;
+    ac.font = '12px Arial, Tahoma, Verdana, sans-serif';
+    ac.textAlign = 'center';
+
+    /* cab and chassis ahead of the cargo space */
+    if (cabFront < 0) {
+      var cabRear = tractor ? Math.min(res.rows[0].x + 1700, (vehicle.axles[0] || { dist: 0 }).dist - 300) : -150;
+      cabRear = Math.max(cabRear, cabFront + 900);
+      ac.fillStyle = '#d5dbe0';
+      ac.strokeStyle = '#5c5b5b';
+      ac.lineWidth = 1.5;
+      var cabTop = padT + plotH * 0.18;
+      ac.beginPath();
+      ac.moveTo(X(cabFront), floorY);
+      ac.lineTo(X(cabFront), cabTop + 10);
+      ac.lineTo(X(cabFront) + 10, cabTop);
+      ac.lineTo(X(cabRear), cabTop);
+      ac.lineTo(X(cabRear), floorY);
+      ac.closePath();
+      ac.fill();
+      ac.stroke();
+      if (tractor) {
+        /* chassis from the cab back past the fifth wheel */
+        var chassisEnd = res.rows.reduce(function (m, r) {
+          return r.part === 'tractor' ? Math.max(m, r.x) : m;
+        }, 0) + 500;
+        ac.fillStyle = '#5c5b5b';
+        ac.fillRect(X(cabFront), floorY + 2, X(chassisEnd) - X(cabFront), 4);
+      }
+    }
+
+    /* the cargo space with what was placed in it */
     ac.strokeStyle = '#5c5b5b';
     ac.lineWidth = 2;
-    ac.strokeRect(padL, padT, plotW, plotH);
+    ac.strokeRect(X(0), padT, vehicle.l * sx, plotH);
 
     state.placed.forEach(function (b) {
       var x = X(b.x);
@@ -880,20 +952,30 @@
       ac.lineTo(cgx + 7, cgy - 7);
       ac.stroke();
       ac.fillStyle = '#5fc2ea';
-      ac.font = '12px Arial, Tahoma, Verdana, sans-serif';
-      ac.textAlign = 'center';
       ac.fillText('CG', cgx, cgy - 10);
     }
 
-    res.axles.forEach(function (a, i) {
-      var x = X(a.x);
-      var ratio = a.limit ? res.loads[i] / a.limit : 0;
-      var status = axleStatus(ratio);
-      var color = status === 'over' ? '#d64545' : status === 'warn' ? '#e4a934' : '#5f9e54';
-      var ay = padT + plotH + 8;
+    if (!res.rows.length) {
+      ac.fillStyle = '#5d5d5d';
+      ac.fillText('Sem eixos próprios: escolha um camião, reboque ou semirreboque para ver as cargas por eixo.', cssW / 2, floorY + 30);
+      return;
+    }
+
+    res.rows.forEach(function (r) {
+      var x = X(r.x);
+      var color = AXLE_COLORS[r.status] || AXLE_COLORS.ok;
+      var ay = floorY + 8;
+      if (r.part === 'kingpin') {
+        /* the kingpin: a pin under the floor */
+        ac.fillStyle = r.info ? '#5c5b5b' : color;
+        ac.fillRect(x - 3, floorY, 6, 10);
+        if (r.info) return; /* its load is already on the tractor's axles */
+        ac.fillStyle = '#5d5d5d';
+        ac.fillText(fmt(r.load) + ' kg', x, ay + 28);
+        ac.fillText('PR', x, ay + 14);
+        return;
+      }
       ac.fillStyle = color;
-      ac.strokeStyle = color;
-      ac.lineWidth = 2;
       ac.beginPath();
       ac.moveTo(x, ay);
       ac.lineTo(x - 9, ay + 14);
@@ -901,36 +983,41 @@
       ac.closePath();
       ac.fill();
       ac.fillStyle = '#5d5d5d';
-      ac.font = '12px Arial, Tahoma, Verdana, sans-serif';
-      ac.textAlign = 'center';
-      ac.fillText(fmt(res.loads[i]) + ' kg', x, ay + 28);
+      ac.fillText(fmt(r.load) + ' kg', x, ay + 28);
     });
   }
 
   function renderAxles() {
     var vehicle = currentVehicle();
     var res = computeAxles(vehicle, state.placed);
-    var widthCenter = vehicle.w / 2;
 
     if (els.axleList) {
       els.axleList.innerHTML = '';
-      res.axles.forEach(function (a, i) {
-        var load = res.loads[i];
-        var ratio = a.limit ? load / a.limit : 0;
-        var status = axleStatus(ratio);
+      if (!res.rows.length) {
+        var none = document.createElement('li');
+        none.className = 'axle-none';
+        none.textContent = 'Este espaço de carga não tem eixos próprios.';
+        els.axleList.appendChild(none);
+      }
+      res.rows.forEach(function (r) {
         var li = document.createElement('li');
-        li.className = 'axle-item';
+        li.className = 'axle-item' + (r.info ? ' info' : '') + (r.part === 'tractor' ? ' tractor' : '');
         var dot = document.createElement('span');
-        dot.className = 'axle-dot ' + status;
+        dot.className = 'axle-dot ' + (r.info ? 'info' : r.status);
         dot.setAttribute('aria-hidden', 'true');
         var label = document.createElement('span');
         label.className = 'axle-name';
-        label.textContent = 'Eixo ' + (i + 1);
+        label.textContent = (r.part === 'tractor' ? 'Cavalo · ' : '') + r.label + ' (' + r.letter + ')';
         var val = document.createElement('b');
-        val.textContent = fmt(load) + ' kg';
+        val.textContent = fmt(r.load) + ' kg';
         var lim = document.createElement('span');
         lim.className = 'axle-limit';
-        lim.textContent = 'máx ' + fmt(a.limit) + ' kg';
+        lim.textContent = r.info
+          ? 'apoiado no cavalo · máx ' + fmt(r.max) + ' kg'
+          : 'máx ' + fmt(r.max) + ' kg · E ' + fmt(r.left) + ' · D ' + fmt(r.right);
+        li.title =
+          r.label + ': ' + fmt(r.cargo) + ' kg de carga + ' + fmt(r.tare) + ' kg de tara. Rodas: esquerda ' +
+          fmt(r.left) + ' kg, direita ' + fmt(r.right) + ' kg.';
         li.appendChild(dot);
         li.appendChild(label);
         li.appendChild(val);
@@ -940,11 +1027,19 @@
     }
 
     if (els.axleCog) {
-      var latM = (res.cgz - widthCenter) / 1000;
+      var latM = (res.cgz - vehicle.w / 2) / 1000;
       var latText = Math.abs(latM) < 0.005 ? 'centrado' : latM < 0 ? 'à esquerda' : 'à direita';
-      els.axleCog.textContent =
+      var text =
         'Centro de gravidade: ' + fmt(res.cgx / 1000, 2) + ' m da frente · desvio lateral ' +
         (latM >= 0 ? '+' : '') + fmt(latM, 2) + ' m (' + latText + ')';
+      if (res.rows.length && res.totalW > 0) {
+        text += ' · carga nas rodas ' + Math.round(res.leftShare * 100) + '% esq. / ' +
+          Math.round((1 - res.leftShare) * 100) + '% dir.';
+      }
+      if (Spaces.takesTractor(vehicle) && !currentTractor()) {
+        text += ' · sem cavalo: só se calcula a carga no pino-rei.';
+      }
+      els.axleCog.textContent = text;
     }
 
     drawAxle(res);
@@ -960,31 +1055,94 @@
     renderGauges();
     renderStatus();
     renderAxles();
+    sceneDirty = true;
     draw();
+    notifyPlan();
   }
 
   /* -------------------------------------------------------------------- ui --- */
-  function selectedVehicleIndexFromUI() {
-    var idx = parseInt(els.vehicle.value, 10);
-    return isFinite(idx) ? clamp(idx, 0, VEHICLES.length - 1) : 0;
+  /* What the cargo-space screens (spaces-ui.js) read from the planner. */
+  function planSummary() {
+    var listWeight = 0;
+    var listVolume = 0;
+    state.items.forEach(function (it) {
+      listWeight += it.weight * it.qty;
+      listVolume += (it.l * it.w * it.h * it.qty) / 1e9;
+    });
+    var used = 0;
+    state.placed.forEach(function (b) {
+      used = Math.max(used, b.x + b.l);
+    });
+    return {
+      space: currentVehicle(),
+      tractor: currentTractor(),
+      tractorId: state.tractorId,
+      totals: state.totals,
+      listWeight: listWeight,
+      listVolume: listVolume,
+      usedLength: used,
+      unplaced: state.unplaced.length
+    };
   }
 
-  function fillVehicles() {
-    els.vehicle.innerHTML = '';
-    VEHICLES.forEach(function (v, i) {
-      var opt = document.createElement('option');
-      opt.value = String(i);
-      /* Short name only: a long option string sets the select's minimum width and
-         pushes the phone layout past the screen edge. Dimensions live in the
-         status bar under the canvas. */
-      opt.textContent = v.name;
-      els.vehicle.appendChild(opt);
-    });
-    els.vehicle.value = String(state.vehicleIndex);
+  /* Chooses the cargo space (and, for a semitrailer, its tractor: '' for none)
+     and plans the load again. */
+  function selectSpace(spaceId, tractorId) {
+    var s = Spaces.get(spaceId);
+    if (!s || Spaces.isTractor(s)) return false;
+    state.spaceId = s.id;
+    if (tractorId !== undefined) state.tractorId = tractorId || '';
+    state.selected = null;
+    save();
+    runPlan();
+    return true;
   }
+
+  /* After the catalogue changed: the chosen space or tractor may be gone. */
+  function refreshSpaces() {
+    var s = Spaces.get(state.spaceId);
+    if (!s || Spaces.isTractor(s)) state.spaceId = Spaces.DEFAULT_SPACE;
+    if (state.tractorId) {
+      var t = Spaces.get(state.tractorId);
+      if (!t || !Spaces.isTractor(t)) state.tractorId = Spaces.get(Spaces.DEFAULT_TRACTOR) ? Spaces.DEFAULT_TRACTOR : '';
+    }
+    save();
+    runPlan();
+  }
+
+  var planListeners = [];
+
+  function notifyPlan() {
+    var summary = planSummary();
+    planListeners.forEach(function (fn) {
+      try {
+        fn(summary);
+      } catch (e) {
+        /* a broken listener must not stop the planner */
+      }
+    });
+  }
+
+  window.SyncrofinApp = {
+    summary: planSummary,
+    select: selectSpace,
+    refresh: refreshSpaces,
+    onPlan: function (fn) {
+      planListeners.push(fn);
+    },
+    closeMenu: function () {
+      setMenu(false);
+    },
+    /* the WebGL view arrived: build its scene and draw */
+    redraw: function () {
+      sceneDirty = true;
+      draw();
+    }
+  };
 
   function addItemFromForm(event) {
     if (event) event.preventDefault();
+    els.formMsg.classList.remove('ok');
 
     var name = els.name.value.trim();
     var l = Math.round(num(els.length.value, 0));
@@ -1056,6 +1214,588 @@
     runPlan();
   }
 
+  /* ---------------------------------------------------------------- import --- */
+  /* Cargo can be read from a spreadsheet: a CSV file (separated by ; , or tab,
+     as Excel saves it in any locale) or an Excel .xlsx workbook. An .xlsx file
+     is a zip of XML parts; it is unpacked with the browser's own
+     DecompressionStream, so no library is needed. Only the first sheet is read.
+     Columns are found by their header (Descrição, Comprimento, Largura, Altura,
+     Peso, Quantidade, Destino, Cor, or the English names); without a header
+     the columns are taken in that order. Imported rows are added to the list. */
+
+  var IMPORT_MAX_BYTES = 10 * 1024 * 1024;
+
+  var COLOR_WORDS = {
+    azul: 'blue', blue: 'blue',
+    amarelo: 'yellow', amarela: 'yellow', yellow: 'yellow',
+    verde: 'green', green: 'green',
+    laranja: 'orange', orange: 'orange',
+    cinza: 'grey', cinzento: 'grey', grey: 'grey', gray: 'grey'
+  };
+  var COLOR_CYCLE = ['blue', 'yellow', 'green', 'orange', 'grey'];
+  var COLOR_LABEL = { blue: 'Azul', yellow: 'Amarelo', green: 'Verde', orange: 'Laranja', grey: 'Cinza' };
+
+  var FIELD_ALIASES = {
+    name: ['descricao', 'desc', 'nome', 'item', 'produto', 'artigo', 'mercadoria', 'name', 'description', 'product'],
+    l: ['comprimento', 'comp', 'compr', 'c', 'length', 'len'],
+    w: ['largura', 'larg', 'width', 'w'],
+    h: ['altura', 'alt', 'a', 'height', 'h'],
+    weight: ['peso', 'massa', 'kg', 'weight'],
+    qty: ['quantidade', 'qtd', 'qtde', 'quant', 'unidades', 'unid', 'un', 'pecas', 'qty', 'quantity', 'units', 'pcs'],
+    dest: ['destino', 'grupo', 'cliente', 'destinatario', 'destination', 'group', 'customer'],
+    color: ['cor', 'color', 'colour']
+  };
+  var POSITIONAL = ['name', 'l', 'w', 'h', 'weight', 'qty', 'dest', 'color'];
+
+  function cellText(v) {
+    return v === undefined || v === null ? '' : String(v).trim();
+  }
+
+  function headerTokens(text) {
+    return cellText(text)
+      .toLowerCase()
+      .normalize('NFD')
+      .replace(/[̀-ͯ]/g, '')
+      .replace(/[^a-z0-9]+/g, ' ')
+      .trim()
+      .split(' ')
+      .filter(Boolean);
+  }
+
+  /* "1.200,5", "1,200.5", "1200,5", "1 200" and "120 kg" all read as numbers. */
+  function parseNumber(v) {
+    if (typeof v === 'number') return isFinite(v) ? v : NaN;
+    var s = cellText(v).replace(/[\s ]/g, '').replace(/[^\d.,\-]/g, '');
+    if (!s || !/\d/.test(s)) return NaN;
+    var lastDot = s.lastIndexOf('.');
+    var lastComma = s.lastIndexOf(',');
+    if (lastDot >= 0 && lastComma >= 0) {
+      var dec = lastDot > lastComma ? '.' : ',';
+      var thou = dec === '.' ? ',' : '.';
+      s = s.split(thou).join('').replace(dec, '.');
+    } else if (lastComma >= 0) {
+      s = /^-?\d{1,3}(,\d{3}){2,}$/.test(s) ? s.split(',').join('') : s.replace(',', '.');
+    } else if (/^-?\d{1,3}(\.\d{3})+$/.test(s)) {
+      s = s.split('.').join('');
+    }
+    var n = parseFloat(s);
+    return isFinite(n) ? n : NaN;
+  }
+
+  /* Reads a header row; returns null when the row does not look like one. */
+  function headerMap(cells) {
+    var cols = {};
+    var unit = {};
+    var weightTotal = false;
+    var hits = 0;
+    var ambiguousL = [];
+
+    cells.forEach(function (cell, idx) {
+      var tokens = headerTokens(cell);
+      if (!tokens.length) return;
+      var first = tokens[0];
+      var field = null;
+      if (first === 'l') {
+        ambiguousL.push({ idx: idx, tokens: tokens });
+        hits++;
+        return;
+      }
+      Object.keys(FIELD_ALIASES).some(function (f) {
+        if (FIELD_ALIASES[f].indexOf(first) >= 0) {
+          field = f;
+          return true;
+        }
+        return false;
+      });
+      if (!field) return;
+      hits++;
+      if (cols[field] !== undefined) return;
+      cols[field] = idx;
+      unit[field] = tokens.slice(1);
+      if (field === 'weight' && tokens.indexOf('total') >= 0) weightTotal = true;
+    });
+
+    /* "L" is length in L × W × H and width in C × L × A. */
+    ambiguousL.forEach(function (a) {
+      var field = cols.l === undefined ? 'l' : cols.w === undefined ? 'w' : null;
+      if (!field) return;
+      cols[field] = a.idx;
+      unit[field] = a.tokens.slice(1);
+    });
+
+    if (hits < 2) return null;
+
+    function lengthFactor(tokens) {
+      if (!tokens) return 1;
+      if (tokens.indexOf('cm') >= 0) return 10;
+      if (tokens.indexOf('m') >= 0 || tokens.indexOf('metro') >= 0 || tokens.indexOf('metros') >= 0) return 1000;
+      return 1;
+    }
+    function weightFactor(tokens) {
+      if (!tokens) return 1;
+      if (tokens.indexOf('t') >= 0 || tokens.indexOf('ton') >= 0 || tokens.indexOf('toneladas') >= 0) return 1000;
+      if (tokens.indexOf('g') >= 0 || tokens.indexOf('gramas') >= 0) return 0.001;
+      return 1;
+    }
+
+    return {
+      cols: cols,
+      factor: {
+        l: lengthFactor(unit.l),
+        w: lengthFactor(unit.w),
+        h: lengthFactor(unit.h),
+        weight: weightFactor(unit.weight)
+      },
+      weightTotal: weightTotal
+    };
+  }
+
+  function positionalMap(firstRow) {
+    /* No header: the usual order, without the description when the first
+       column already holds a number. */
+    var order = isFinite(parseNumber(firstRow[0])) ? POSITIONAL.slice(1) : POSITIONAL;
+    var cols = {};
+    order.forEach(function (f, i) {
+      cols[f] = i;
+    });
+    return { cols: cols, factor: { l: 1, w: 1, h: 1, weight: 1 }, weightTotal: false };
+  }
+
+  /* rows: [{ line: <row number in the file>, cells: [...] }] */
+  function rowsToItems(rows, vehicle) {
+    var data = rows.filter(function (r) {
+      return r.cells.some(function (c) {
+        return cellText(c) !== '';
+      });
+    });
+    if (!data.length) return { error: 'A planilha está vazia.' };
+
+    var map = null;
+    var start = 0;
+    for (var i = 0; i < Math.min(5, data.length); i++) {
+      map = headerMap(data[i].cells);
+      if (map) {
+        start = i + 1;
+        break;
+      }
+    }
+    if (!map) map = positionalMap(data[0].cells);
+
+    var cols = map.cols;
+    if (cols.l === undefined || cols.w === undefined || cols.h === undefined) {
+      return { error: 'Não encontrei as colunas de comprimento, largura e altura na planilha.' };
+    }
+
+    var items = [];
+    var skipped = [];
+    var colorTurn = 0;
+
+    function get(cells, field) {
+      return cols[field] === undefined ? undefined : cells[cols[field]];
+    }
+
+    for (var r = start; r < data.length; r++) {
+      var row = data[r];
+      var cells = row.cells;
+      var l = Math.round(parseNumber(get(cells, 'l')) * map.factor.l);
+      var w = Math.round(parseNumber(get(cells, 'w')) * map.factor.w);
+      var h = Math.round(parseNumber(get(cells, 'h')) * map.factor.h);
+      var qtyRaw = parseNumber(get(cells, 'qty'));
+      var qty = isFinite(qtyRaw) ? Math.round(qtyRaw) : 1;
+      var weightRaw = parseNumber(get(cells, 'weight'));
+      var weight = isFinite(weightRaw) ? weightRaw * map.factor.weight : 0;
+      if (map.weightTotal && qty > 0) weight = weight / qty;
+      weight = Math.round(weight * 100) / 100;
+
+      var reason = null;
+      if (!isFinite(l) || !isFinite(w) || !isFinite(h)) reason = 'medidas em falta';
+      else if (l < 50 || w < 50 || h < 20) reason = 'medidas abaixo de 50 × 50 × 20 mm';
+      else if (l > vehicle.l || w > vehicle.w || h > vehicle.h) reason = 'não cabe no ' + vehicle.name;
+      else if (qty < 1 || qty > 500) reason = 'quantidade fora de 1 a 500';
+      else if (!(weight >= 0) || weight > 30000) reason = 'peso inválido';
+      if (reason) {
+        skipped.push({ line: row.line, reason: reason });
+        continue;
+      }
+
+      var colorWord = headerTokens(get(cells, 'color'))[0];
+      var color = COLOR_WORDS[colorWord] || COLOR_CYCLE[colorTurn++ % COLOR_CYCLE.length];
+      var name = cellText(get(cells, 'name')) || 'Volume ' + (items.length + 1);
+
+      items.push({
+        name: name.slice(0, 28),
+        l: l,
+        w: w,
+        h: h,
+        weight: weight,
+        qty: qty,
+        color: color,
+        dest: cellText(get(cells, 'dest')).slice(0, 40)
+      });
+    }
+
+    return { items: items, skipped: skipped };
+  }
+
+  /* ---- CSV ---- */
+  function decodeText(bytes) {
+    var text;
+    try {
+      text = new TextDecoder('utf-8', { fatal: true }).decode(bytes);
+    } catch (e) {
+      /* Excel on Windows saves CSV in the ANSI code page */
+      text = new TextDecoder('windows-1252').decode(bytes);
+    }
+    return text.charCodeAt(0) === 0xfeff ? text.slice(1) : text;
+  }
+
+  function detectDelimiter(text) {
+    var firstLine = text.split(/\r?\n/).filter(function (s) {
+      return s.trim() !== '';
+    })[0] || '';
+    var counts = { ';': 0, '\t': 0, ',': 0 };
+    var quoted = false;
+    for (var i = 0; i < firstLine.length; i++) {
+      var ch = firstLine[i];
+      if (ch === '"') quoted = !quoted;
+      else if (!quoted && ch in counts) counts[ch]++;
+    }
+    var best = ';';
+    [';', '\t', ','].forEach(function (d) {
+      if (counts[d] > counts[best]) best = d;
+    });
+    return best;
+  }
+
+  function parseCsv(text) {
+    var delim = detectDelimiter(text);
+    var rows = [];
+    var row = [];
+    var field = '';
+    var quoted = false;
+    var line = 1;
+    var rowLine = 1;
+
+    function endField() {
+      row.push(field);
+      field = '';
+    }
+    function endRow() {
+      endField();
+      rows.push({ line: rowLine, cells: row });
+      row = [];
+    }
+
+    for (var i = 0; i < text.length; i++) {
+      var ch = text[i];
+      if (quoted) {
+        if (ch === '"') {
+          if (text[i + 1] === '"') {
+            field += '"';
+            i++;
+          } else {
+            quoted = false;
+          }
+        } else {
+          if (ch === '\n') line++;
+          field += ch;
+        }
+      } else if (ch === '"' && field === '') {
+        quoted = true;
+      } else if (ch === delim) {
+        endField();
+      } else if (ch === '\r') {
+        /* handled with the \n that follows */
+      } else if (ch === '\n') {
+        endRow();
+        line++;
+        rowLine = line;
+      } else {
+        field += ch;
+      }
+    }
+    if (field !== '' || row.length) endRow();
+    return rows;
+  }
+
+  /* ---- XLSX ---- */
+  function readZip(bytes) {
+    var view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+    var eocd = -1;
+    for (var i = bytes.length - 22; i >= Math.max(0, bytes.length - 22 - 65535); i--) {
+      if (view.getUint32(i, true) === 0x06054b50) {
+        eocd = i;
+        break;
+      }
+    }
+    if (eocd < 0) throw new Error('zip');
+    var count = view.getUint16(eocd + 10, true);
+    var p = view.getUint32(eocd + 16, true);
+    var utf8 = new TextDecoder('utf-8');
+    var entries = {};
+    for (var n = 0; n < count; n++) {
+      if (view.getUint32(p, true) !== 0x02014b50) throw new Error('zip');
+      var method = view.getUint16(p + 10, true);
+      var size = view.getUint32(p + 20, true);
+      var nameLen = view.getUint16(p + 28, true);
+      var extraLen = view.getUint16(p + 30, true);
+      var commentLen = view.getUint16(p + 32, true);
+      var local = view.getUint32(p + 42, true);
+      var name = utf8.decode(bytes.subarray(p + 46, p + 46 + nameLen));
+      var start = local + 30 + view.getUint16(local + 26, true) + view.getUint16(local + 28, true);
+      entries[name] = { method: method, data: bytes.subarray(start, start + size) };
+      p += 46 + nameLen + extraLen + commentLen;
+    }
+    return entries;
+  }
+
+  function unzipText(entries, name) {
+    var entry = entries[name];
+    if (!entry) return Promise.resolve(null);
+    var utf8 = new TextDecoder('utf-8');
+    if (entry.method === 0) return Promise.resolve(utf8.decode(entry.data));
+    if (entry.method !== 8) return Promise.reject(new Error('zip'));
+    var stream = new Blob([entry.data]).stream().pipeThrough(new DecompressionStream('deflate-raw'));
+    return new Response(stream).arrayBuffer().then(function (buf) {
+      return utf8.decode(new Uint8Array(buf));
+    });
+  }
+
+  function xmlDecode(s) {
+    return s.replace(/&(#x[0-9a-f]+|#\d+|amp|lt|gt|quot|apos);/gi, function (m, e) {
+      var k = e.toLowerCase();
+      if (k === 'amp') return '&';
+      if (k === 'lt') return '<';
+      if (k === 'gt') return '>';
+      if (k === 'quot') return '"';
+      if (k === 'apos') return "'";
+      return String.fromCodePoint(k[1] === 'x' ? parseInt(k.slice(2), 16) : parseInt(k.slice(1), 10));
+    });
+  }
+
+  function xmlAttr(attrs, name) {
+    var m = new RegExp('(?:^|\\s)' + name + '="([^"]*)"').exec(attrs);
+    return m ? xmlDecode(m[1]) : null;
+  }
+
+  function xmlTexts(xml) {
+    /* the text of every <t> inside a string, without phonetic hints */
+    var out = '';
+    var re = /<(?:\w+:)?t\b[^>]*?(?:\/>|>([\s\S]*?)<\/(?:\w+:)?t>)/g;
+    var m;
+    xml = xml.replace(/<(?:\w+:)?rPh\b[\s\S]*?<\/(?:\w+:)?rPh>/g, '');
+    while ((m = re.exec(xml))) out += m[1] ? xmlDecode(m[1]) : '';
+    return out;
+  }
+
+  function columnIndex(ref) {
+    var letters = /^[A-Z]+/i.exec(ref || '');
+    if (!letters) return -1;
+    var n = 0;
+    var s = letters[0].toUpperCase();
+    for (var i = 0; i < s.length; i++) n = n * 26 + (s.charCodeAt(i) - 64);
+    return n - 1;
+  }
+
+  function parseSheet(xml, shared) {
+    var rows = [];
+    var rowRe = /<(?:\w+:)?row\b([^>]*?)(?:\/>|>([\s\S]*?)<\/(?:\w+:)?row>)/g;
+    var cellRe = /<(?:\w+:)?c\b([^>]*?)(?:\/>|>([\s\S]*?)<\/(?:\w+:)?c>)/g;
+    var rm;
+    var nextLine = 1;
+    while ((rm = rowRe.exec(xml))) {
+      var line = parseInt(xmlAttr(rm[1], 'r'), 10) || nextLine;
+      nextLine = line + 1;
+      var cells = [];
+      var col = 0;
+      var cm;
+      var body = rm[2] || '';
+      cellRe.lastIndex = 0;
+      while ((cm = cellRe.exec(body))) {
+        var ref = xmlAttr(cm[1], 'r');
+        var idx = ref ? columnIndex(ref) : col;
+        if (idx < 0) idx = col;
+        col = idx + 1;
+        var type = xmlAttr(cm[1], 't') || 'n';
+        var inner = cm[2] || '';
+        var vm = /<(?:\w+:)?v\b[^>]*>([\s\S]*?)<\/(?:\w+:)?v>/.exec(inner);
+        var raw = vm ? xmlDecode(vm[1]) : '';
+        var value;
+        if (type === 's') value = shared[parseInt(raw, 10)] || '';
+        else if (type === 'inlineStr') value = xmlTexts(inner);
+        else if (type === 'n') value = raw === '' ? '' : parseFloat(raw);
+        else if (type === 'e') value = '';
+        else value = raw;
+        cells[idx] = value;
+      }
+      for (var k = 0; k < cells.length; k++) if (cells[k] === undefined) cells[k] = '';
+      rows.push({ line: line, cells: cells });
+    }
+    return rows;
+  }
+
+  function parseXlsx(bytes) {
+    var entries;
+    try {
+      entries = readZip(bytes);
+    } catch (e) {
+      return Promise.reject(new Error('O ficheiro .xlsx está danificado.'));
+    }
+    if (!entries['xl/workbook.xml']) {
+      return Promise.reject(new Error('Este ficheiro não é uma planilha Excel (.xlsx). Guarde-a como .xlsx ou .csv.'));
+    }
+    if (typeof DecompressionStream === 'undefined') {
+      return Promise.reject(new Error('Este navegador não abre ficheiros .xlsx. Guarde a planilha como .csv e importe de novo.'));
+    }
+    return Promise.all([
+      unzipText(entries, 'xl/workbook.xml'),
+      unzipText(entries, 'xl/_rels/workbook.xml.rels'),
+      unzipText(entries, 'xl/sharedStrings.xml')
+    ]).then(function (parts) {
+      var sheetPath = null;
+      var first = /<(?:\w+:)?sheet\b([^>]*)\/?>/.exec(parts[0] || '');
+      var rid = first ? xmlAttr(first[1], 'r:id') : null;
+      if (rid && parts[1]) {
+        var relRe = /<(?:\w+:)?Relationship\b([^>]*)\/?>/g;
+        var rel;
+        while ((rel = relRe.exec(parts[1]))) {
+          if (xmlAttr(rel[1], 'Id') === rid) {
+            var target = xmlAttr(rel[1], 'Target') || '';
+            sheetPath = target.charAt(0) === '/' ? target.slice(1) : 'xl/' + target.replace(/^\.\//, '');
+            break;
+          }
+        }
+      }
+      if (!sheetPath || !entries[sheetPath]) {
+        sheetPath = Object.keys(entries).filter(function (k) {
+          return /^xl\/worksheets\/[^/]+\.xml$/.test(k);
+        }).sort()[0];
+      }
+      if (!sheetPath) throw new Error('A planilha não tem nenhuma folha.');
+
+      var shared = [];
+      var siRe = /<(?:\w+:)?si\b[^>]*?(?:\/>|>([\s\S]*?)<\/(?:\w+:)?si>)/g;
+      var si;
+      while ((si = siRe.exec(parts[2] || ''))) shared.push(si[1] ? xmlTexts(si[1]) : '');
+
+      return unzipText(entries, sheetPath).then(function (xml) {
+        return parseSheet(xml || '', shared);
+      });
+    });
+  }
+
+  /* bytes: Uint8Array of the chosen file */
+  function readSpreadsheet(bytes) {
+    if (bytes.length >= 4 && bytes[0] === 0x50 && bytes[1] === 0x4b && bytes[2] === 0x03 && bytes[3] === 0x04) {
+      return parseXlsx(bytes);
+    }
+    if (bytes.length >= 4 && bytes[0] === 0xd0 && bytes[1] === 0xcf && bytes[2] === 0x11 && bytes[3] === 0xe0) {
+      return Promise.reject(new Error('Ficheiros .xls antigos não são lidos. No Excel, guarde a planilha como .xlsx ou .csv.'));
+    }
+    try {
+      return Promise.resolve(parseCsv(decodeText(bytes)));
+    } catch (e) {
+      return Promise.reject(new Error('Não consegui ler o ficheiro como CSV.'));
+    }
+  }
+
+  function setMsg(text, ok) {
+    els.formMsg.textContent = text;
+    els.formMsg.classList[ok ? 'add' : 'remove']('ok');
+  }
+
+  function importReport(fileName, result) {
+    var units = result.items.reduce(function (s, it) {
+      return s + it.qty;
+    }, 0);
+    var msg = '';
+    if (result.items.length) {
+      msg =
+        'Importados ' + result.items.length + (result.items.length === 1 ? ' item' : ' itens') +
+        ' (' + units + (units === 1 ? ' volume' : ' volumes') + ') de ' + fileName + '.';
+    } else {
+      msg = 'Nenhuma linha de ' + fileName + ' foi importada.';
+    }
+    if (result.skipped.length) {
+      var shown = result.skipped.slice(0, 3).map(function (s) {
+        return 'linha ' + s.line + ': ' + s.reason;
+      });
+      var more = result.skipped.length - shown.length;
+      msg +=
+        ' ' + result.skipped.length + (result.skipped.length === 1 ? ' linha ignorada' : ' linhas ignoradas') +
+        ' (' + shown.join('; ') + (more > 0 ? '; e mais ' + more : '') + ').';
+    }
+    return msg;
+  }
+
+  function importFile(file) {
+    if (!file) return Promise.resolve();
+    if (file.size > IMPORT_MAX_BYTES) {
+      setMsg('O ficheiro tem mais de 10 MB. Importe uma planilha mais pequena.', false);
+      return Promise.resolve();
+    }
+    setMsg('A ler ' + file.name + '…', true);
+    return file
+      .arrayBuffer()
+      .then(function (buf) {
+        return readSpreadsheet(new Uint8Array(buf));
+      })
+      .then(function (rows) {
+        var result = rowsToItems(rows, currentVehicle());
+        if (result.error) {
+          setMsg(result.error, false);
+          return;
+        }
+        result.items.forEach(function (it) {
+          it.id = nextId++;
+          state.items.push(it);
+        });
+        setMsg(importReport(file.name, result), result.items.length > 0);
+        if (result.items.length) {
+          state.selected = null;
+          save();
+          runPlan();
+        }
+      })
+      .catch(function (err) {
+        setMsg(err && err.message ? err.message : 'Não consegui ler a planilha.', false);
+      });
+  }
+
+  function templateCsv() {
+    var lines = ['Descrição;Comprimento (mm);Largura (mm);Altura (mm);Peso (kg);Quantidade;Destino;Cor'];
+    DEMO.forEach(function (it) {
+      lines.push([it.name, it.l, it.w, it.h, it.weight, it.qty, it.dest, COLOR_LABEL[it.color]].join(';'));
+    });
+    return lines.join('\r\n') + '\r\n';
+  }
+
+  function downloadTemplate() {
+    if (typeof Blob === 'undefined' || !window.URL || !window.URL.createObjectURL) return;
+    /* the BOM makes Excel open the accents as UTF-8 */
+    var blob = new Blob(['﻿' + templateCsv()], { type: 'text/csv;charset=utf-8' });
+    var url = window.URL.createObjectURL(blob);
+    var a = document.createElement('a');
+    a.href = url;
+    a.download = 'modelo-carga.csv';
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    window.setTimeout(function () {
+      window.URL.revokeObjectURL(url);
+    }, 1000);
+  }
+
+  /* exposed so the import can be checked outside the page */
+  window.SyncrofinImport = {
+    parseNumber: parseNumber,
+    parseCsv: parseCsv,
+    readSpreadsheet: readSpreadsheet,
+    rowsToItems: rowsToItems,
+    importFile: importFile,
+    templateCsv: templateCsv
+  };
+
   function setView(kind) {
     if (kind === 'top') {
       state.view.az = Math.PI / 2;
@@ -1070,8 +1810,9 @@
       state.view.az = Math.PI / 2;
       state.view.elev = 0.04;
     } else {
-      state.view.az = 0.95;
-      state.view.elev = 0.42;
+      /* from the front left, high: the cab and the load in one picture */
+      state.view.az = -2.3;
+      state.view.elev = 0.4;
     }
     state.view.zoom = 1;
     Array.prototype.forEach.call(els.viewButtons, function (b) {
@@ -1163,13 +1904,6 @@
       });
     }
 
-    els.vehicle.addEventListener('change', function () {
-      state.vehicleIndex = selectedVehicleIndexFromUI();
-      state.selected = null;
-      save();
-      runPlan();
-    });
-
     els.form.addEventListener('submit', addItemFromForm);
     els.plan.addEventListener('click', function () {
       setMenu(false);
@@ -1183,6 +1917,18 @@
       setMenu(false);
       clearAll();
     });
+    if (els.importBtn && els.importFile) {
+      els.importBtn.addEventListener('click', function () {
+        setMenu(false);
+        els.importFile.value = '';
+        els.importFile.click();
+      });
+      els.importFile.addEventListener('change', function () {
+        var file = els.importFile.files && els.importFile.files[0];
+        if (file) importFile(file);
+      });
+    }
+    if (els.template) els.template.addEventListener('click', downloadTemplate);
     if (els.report) {
       els.report.addEventListener('click', function () {
         if (typeof window.print === 'function') window.print();
@@ -1241,10 +1987,12 @@
     els.qty = $('#f-qty');
     els.color = $('#f-color');
     els.dest = $('#f-dest');
-    els.vehicle = $('#vehicle');
     els.plan = $('#plan');
     els.demo = $('#demo');
     els.clear = $('#clear');
+    els.importBtn = $('#import');
+    els.importFile = $('#import-file');
+    els.template = $('#template');
     els.report = $('#report');
     els.status = $('#status');
     els.dims = $('#vehicle-dims');
@@ -1285,7 +2033,6 @@
       });
     }
 
-    fillVehicles();
     wireUi();
     wireCanvas();
     runPlan();

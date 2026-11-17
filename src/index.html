@@ -23,19 +23,22 @@
     <span class="sr-only">Toggle navigation</span>
   </button>
 
-  <div class="vehicle-picker">
-    <label for="vehicle">Veículo</label>
-    <select id="vehicle"></select>
-  </div>
+  <nav class="view-tabs" aria-label="Secções">
+    <button type="button" class="tab on" data-tab="plan" aria-pressed="true">Plano de carga</button>
+    <button type="button" class="tab" data-tab="spaces" aria-pressed="false">Espaços de carga</button>
+  </nav>
 
   <div class="top-actions" id="top-actions">
+    <button class="btn ghost" id="import" type="button">Importar planilha</button>
+    <input id="import-file" type="file" hidden
+      accept=".xlsx,.csv,.txt,text/csv,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet">
     <button class="btn ghost" id="demo" type="button">Carga de exemplo</button>
     <button class="btn ghost" id="clear" type="button">Limpar</button>
     <button class="btn primary" id="plan" type="button">Carregar</button>
   </div>
 </header>
 
-<main class="workspace">
+<main class="workspace" id="workspace">
 
   <aside class="panel" aria-label="Lista de carga">
     <div class="panel-head">
@@ -57,15 +60,15 @@
       <div class="grid3">
         <div class="field">
           <label for="f-l">Comp. mm</label>
-          <input id="f-l" name="l" type="number" inputmode="numeric" min="50" max="13600" step="10" value="1200" required>
+          <input id="f-l" name="l" type="number" inputmode="numeric" min="50" max="20000" step="10" value="1200" required>
         </div>
         <div class="field">
           <label for="f-w">Larg. mm</label>
-          <input id="f-w" name="w" type="number" inputmode="numeric" min="50" max="2450" step="10" value="800" required>
+          <input id="f-w" name="w" type="number" inputmode="numeric" min="50" max="3000" step="10" value="800" required>
         </div>
         <div class="field">
           <label for="f-h">Alt. mm</label>
-          <input id="f-h" name="h" type="number" inputmode="numeric" min="20" max="3000" step="10" value="1000" required>
+          <input id="f-h" name="h" type="number" inputmode="numeric" min="20" max="4000" step="10" value="1000" required>
         </div>
       </div>
 
@@ -92,6 +95,11 @@
 
       <button class="btn dark" type="submit">Adicionar item</button>
       <p class="form-msg" id="form-msg" role="status"></p>
+      <p class="import-hint">
+        Também pode importar volumes de uma planilha Excel (.xlsx) ou CSV com as colunas
+        Descrição, Comprimento, Largura, Altura (mm), Peso (kg por unidade), Quantidade, Destino e Cor.
+        <button class="link-btn" id="template" type="button">Baixar modelo CSV</button>
+      </p>
     </form>
 
     <ul class="items" id="items"></ul>
@@ -129,7 +137,39 @@
     <div class="canvas-wrap">
       <canvas id="view" role="img" aria-label="Vista tridimensional da carga colocada"></canvas>
       <p class="hint-drag">Arraste para rodar · amplie com a roda ou com dois dedos</p>
+
+      <section class="space-card" id="space-card" aria-label="Espaço de carga escolhido">
+        <div class="space-card-head">
+          <div class="space-card-text">
+            <p class="space-title" id="space-title">Espaço de carga</p>
+            <p class="space-sub" id="space-sub" hidden></p>
+          </div>
+          <button type="button" class="space-open" id="space-open" aria-expanded="false" aria-controls="space-drawer"
+            aria-label="Escolher outro espaço de carga" title="Escolher outro espaço de carga">
+            <span aria-hidden="true">▾</span>
+          </button>
+        </div>
+        <table class="space-stats" id="space-stats"></table>
+      </section>
     </div>
+
+    <aside class="space-drawer" id="space-drawer" hidden aria-label="Escolher espaço de carga">
+      <div class="drawer-head">
+        <button type="button" class="icon-btn" id="space-filter-btn" aria-expanded="false" aria-controls="space-filter"
+          aria-label="Filtrar por tipo" title="Filtrar por tipo">
+          <svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true" focusable="false"><path d="M3 4h18l-7 8.5V19l-4 2v-8.5z" fill="currentColor"/></svg>
+        </button>
+        <button type="button" class="icon-btn" id="space-fav-btn" aria-pressed="false"
+          aria-label="Mostrar só os favoritos" title="Mostrar só os favoritos"></button>
+        <span class="drawer-title">Espaços de carga</span>
+        <button type="button" class="icon-btn" id="space-close" aria-label="Fechar a lista" title="Fechar">×</button>
+      </div>
+      <div class="space-filter" id="space-filter" hidden role="group" aria-label="Tipos de espaço de carga"></div>
+      <ul class="space-list" id="space-list"></ul>
+      <div class="drawer-foot">
+        <button type="button" class="btn line small" id="space-add">+ Criar espaço de carga</button>
+      </div>
+    </aside>
 
     <div class="stage-foot">
       <span id="status">Pronto.</span>
@@ -151,12 +191,76 @@
 
 </main>
 
+<section class="spaces-view" id="spaces-view" hidden aria-labelledby="spaces-heading">
+  <div class="spaces-inner">
+    <div class="spaces-head">
+      <h1 id="spaces-heading">Espaços de carga</h1>
+      <button type="button" class="btn primary" id="space-create">+ Criar espaço de carga personalizado</button>
+    </div>
+    <p class="spaces-notice" id="spaces-notice" role="status" hidden></p>
+
+    <div class="space-form-wrap" id="space-form-wrap" hidden></div>
+
+    <div class="spaces-pager" id="spaces-pager"></div>
+    <div class="table-wrap">
+      <table class="spaces-table">
+        <thead>
+          <tr>
+            <th scope="col" class="c-fav"><span class="sr-only">Favorito</span></th>
+            <th scope="col" aria-sort="ascending"><button type="button" class="sort" data-sort="name">Nome</button></th>
+            <th scope="col" aria-sort="none"><button type="button" class="sort" data-sort="type">Tipo</button></th>
+            <th scope="col" class="num" aria-sort="none"><button type="button" class="sort" data-sort="l" title="Comprimento interno (mm)">Comp. int.</button></th>
+            <th scope="col" class="num" aria-sort="none"><button type="button" class="sort" data-sort="w" title="Largura interna (mm)">Larg. int.</button></th>
+            <th scope="col" class="num" aria-sort="none"><button type="button" class="sort" data-sort="h" title="Altura interna (mm)">Alt. int.</button></th>
+            <th scope="col" class="num" aria-sort="none"><button type="button" class="sort" data-sort="payload">Carga máx.</button></th>
+            <th scope="col" aria-sort="none"><button type="button" class="sort" data-sort="origin">Origem</button></th>
+            <th scope="col" aria-sort="none"><button type="button" class="sort" data-sort="created">Criado em</button></th>
+            <th scope="col"><span class="sr-only">Ações</span></th>
+          </tr>
+          <tr class="filter-row">
+            <td>
+              <select id="flt-fav" aria-label="Filtrar favoritos">
+                <option value="">Todos</option>
+                <option value="yes">★</option>
+                <option value="no">Sem ★</option>
+              </select>
+            </td>
+            <td><input id="flt-name" type="search" aria-label="Filtrar pelo nome" placeholder="Nome…" autocomplete="off"></td>
+            <td>
+              <select id="flt-type" aria-label="Filtrar pelo tipo">
+                <option value="">Todos</option>
+              </select>
+            </td>
+            <td></td>
+            <td></td>
+            <td></td>
+            <td></td>
+            <td>
+              <select id="flt-origin" aria-label="Filtrar pela origem">
+                <option value="">Todas</option>
+                <option value="system">Padrão</option>
+                <option value="custom">Personalizado</option>
+              </select>
+            </td>
+            <td><input id="flt-created" type="date" aria-label="Filtrar pela data de criação"></td>
+            <td></td>
+          </tr>
+        </thead>
+        <tbody id="spaces-tbody"></tbody>
+      </table>
+    </div>
+  </div>
+</section>
+
 <footer class="foot-note">
   <span>Desenvolvido por Gustavo F. Landal - 2026 - gustavoflandal@gmail.com</span>
   <span>Enter adiciona a caixa · Esc fecha o menu e limpa a seleção</span>
   <span>Os planos ficam guardados só neste navegador.</span>
 </footer>
 
+<script src="assets/spaces.js"></script>
 <script src="assets/app.js"></script>
+<script src="assets/spaces-ui.js"></script>
+<script type="module" src="assets/scene3d.js"></script>
 </body>
 </html>
