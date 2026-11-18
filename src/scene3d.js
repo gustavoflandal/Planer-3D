@@ -236,8 +236,10 @@ function boxFace(hex, name, wmm, hmm, side) {
   g.lineWidth = edge;
   g.strokeRect(edge / 2, edge / 2, W - edge, H - edge);
 
-  /* label */
-  const ink = 'rgba(22,24,26,0.85)';
+  /* label: dark print, light on a dark box */
+  const rgb = [1, 3, 5].map((i) => parseInt(String(hex).slice(i, i + 2), 16) / 255);
+  const lum = 0.2126 * rgb[0] + 0.7152 * rgb[1] + 0.0722 * rgb[2];
+  const ink = lum < 0.42 ? 'rgba(255,255,255,0.92)' : 'rgba(22,24,26,0.85)';
   const pad = Math.max(4, Math.min(W, H) * 0.08);
   const markS = side === 'side' && Math.min(W, H) > 70 ? Math.min(W, H) * 0.17 : 0;
   if (markS) upMark(g, W - pad - markS, pad, markS, ink);
@@ -683,6 +685,143 @@ function cab(group, o) {
   return { xRear: xFront + len, covered };
 }
 
+/* A side profile extruded across the width, with rounded edges. */
+function extrudeSide(group, s, x, width, cz, material) {
+  const bevel = 0.05;
+  const geo = new THREE.ExtrudeGeometry(s, {
+    depth: width - 2 * bevel,
+    bevelEnabled: true,
+    bevelThickness: bevel,
+    bevelSize: bevel,
+    bevelOffset: -bevel,
+    bevelSegments: 3,
+    curveSegments: 18
+  });
+  const m = new THREE.Mesh(geo, material);
+  m.position.set(x, 0, cz - width / 2 + bevel);
+  m.castShadow = true;
+  m.receiveShadow = true;
+  group.add(m);
+  return m;
+}
+
+/* The bottom edge of a profile from u0 to u1 at height b, cut by a wheel
+   arch at every centre in arches (radius r, centre at wheel height wy).
+   An arch that does not fit inside the span is left out. */
+function bottomWithArches(s, u0, u1, b, arches, r, wy) {
+  arches.slice().sort((p, q) => p - q).forEach((a) => {
+    if (a - r < u0 + 0.05 || a + r > u1 - 0.05) return;
+    s.lineTo(a - r, b);
+    s.lineTo(a - r, wy);
+    s.absarc(a, wy, r, Math.PI, 0, true);
+    s.lineTo(a + r, b);
+  });
+  s.lineTo(u1, b);
+}
+
+/* The front of a van, the cab and bonnet in one piece with the body: a
+   short sloping bonnet, a raked windscreen running up into the roof, door
+   windows, headlights, grille, bumper and mirrors. The cargo body behind it
+   (x from 0) is drawn as the cargo space; under it a skirt with the rear
+   wheel arches closes the side down to the sills.
+
+   o: { xFront, top, deck, width, cz, L, colour, fronts: [x], rears: [x],
+   wheelR } — fronts are the steering axles under the cab. */
+function vanBody(group, o) {
+  const xFront = o.xFront;
+  const len = -xFront + 0.02; /* reaches just into the cargo front wall */
+  const top = o.top;
+  const width = o.width;
+  const cz = o.cz;
+  const b = 0.3; /* sills */
+  const archR = o.wheelR + 0.07;
+  const wy = o.wheelR;
+  const hoodY = Math.min(top - 0.5, o.deck + 0.42);
+  const hoodLen = Math.min(0.85, len * 0.36);
+  const rake = Math.max(0.35, Math.min((top - hoodY) * 0.62, len - hoodLen - 0.3));
+  const wsTop = hoodLen + rake; /* where the windscreen meets the roof */
+  const paint = paintMat(o.colour);
+
+  const s = new THREE.Shape();
+  s.moveTo(0.04, b);
+  bottomWithArches(s, 0.04, len, b, o.fronts.map((x) => x - xFront), archR, wy);
+  s.lineTo(len, top);
+  s.lineTo(wsTop + 0.16, top);
+  s.quadraticCurveTo(wsTop, top, wsTop - 0.05, top - 0.07);
+  s.lineTo(hoodLen, hoodY + 0.1);
+  s.quadraticCurveTo(0.12, hoodY + 0.02, 0.05, hoodY - 0.06);
+  s.lineTo(0, b + 0.3);
+  s.closePath();
+  extrudeSide(group, s, xFront, width, cz, paint);
+
+  /* skirt under the cargo body, with the rear wheel arches; where an arch
+     reaches above the floor the skirt rises over it as a wheel housing */
+  const sk = new THREE.Shape();
+  const skTop = o.deck + 0.02;
+  const housing = archR + 0.06;
+  sk.moveTo(0, b);
+  bottomWithArches(sk, 0, o.L, b, o.rears, archR, wy);
+  sk.lineTo(o.L, skTop);
+  o.rears.slice().sort((p, q) => q - p).forEach((a) => {
+    if (a - archR < 0.05 || a + archR > o.L - 0.05 || wy + housing <= skTop) return;
+    const dx = Math.sqrt(housing * housing - (skTop - wy) * (skTop - wy));
+    const from = Math.asin((skTop - wy) / housing);
+    sk.lineTo(a + dx, skTop);
+    sk.absarc(a, wy, housing, from, Math.PI - from, false);
+  });
+  sk.lineTo(0, skTop);
+  sk.closePath();
+  extrudeSide(group, sk, 0, width, cz, paint);
+
+  const glass = glassMat();
+  const trim = trimMat();
+  const X = (u) => xFront + u;
+
+  /* windscreen on the raked line */
+  const wsLow = hoodY + 0.13;
+  const wsHigh = top - 0.1;
+  const u0 = hoodLen + 0.03;
+  const u1 = wsTop - 0.08;
+  const ws = box(group, 0.02, Math.hypot(u1 - u0, wsHigh - wsLow), width * 0.86,
+    X((u0 + u1) / 2 - 0.012), (wsLow + wsHigh) / 2, cz, glass, false);
+  ws.rotation.z = -Math.atan2(u1 - u0, wsHigh - wsLow);
+
+  /* door windows: their front edge follows the windscreen */
+  const winLow = hoodY + 0.16;
+  const winHigh = Math.min(top - 0.14, winLow + 0.62);
+  const along = (y) => u0 + ((y - wsLow) / (wsHigh - wsLow)) * (u1 - u0) + 0.1;
+  const doorEnd = Math.min(len - 0.12, wsTop + 0.55);
+  const win = new THREE.Shape();
+  win.moveTo(along(winLow), winLow);
+  win.lineTo(doorEnd - 0.06, winLow);
+  win.lineTo(doorEnd - 0.06, winHigh);
+  win.lineTo(along(winHigh), winHigh);
+  win.closePath();
+  const winGeo = new THREE.ShapeGeometry(win);
+  const winMat = glassMat();
+  winMat.side = THREE.DoubleSide;
+  [1, -1].forEach((side) => {
+    const face = cz + side * (width / 2 + 0.004);
+    const w = new THREE.Mesh(winGeo, winMat);
+    w.position.set(xFront, 0, face);
+    group.add(w);
+    /* door seam, handle and mirror */
+    box(group, 0.015, top - 0.12 - (b + 0.06), 0.008, X(doorEnd), (top - 0.12 + b + 0.06) / 2, face, trim, false);
+    box(group, 0.12, 0.03, 0.02, X(doorEnd - 0.16), hoodY + 0.02, face + side * 0.01, trim, false);
+    box(group, 0.07, 0.2, 0.05, X(along(winLow) + 0.02), winLow + 0.06, cz + side * (width / 2 + 0.06), trim);
+    box(group, 0.08, 0.24, 0.14, X(along(winLow) + 0.03), winLow + 0.08, cz + side * (width / 2 + 0.15), paint);
+  });
+
+  /* bumper, grille and headlights */
+  const bTop = b + 0.26;
+  box(group, 0.24, bTop - b, width + 0.02, X(0.1), (b + bTop) / 2, cz, mat(0x3b3f44, { roughness: 0.55 }));
+  box(group, 0.04, Math.max(0.08, hoodY - 0.16 - bTop), width * 0.5, X(0.015), (bTop + hoodY - 0.16) / 2, cz, trim, false);
+  const lamp = mat(0xfff8e6, { emissive: 0x77705e, roughness: 0.2, metalness: 0.2 });
+  [1, -1].forEach((side) => {
+    box(group, 0.1, 0.13, 0.36, X(0.06), hoodY - 0.13, cz + side * width * 0.34, lamp, false);
+  });
+}
+
 /* ------------------------------------------------------------- the build --- */
 function disposeWorld() {
   if (!world) return;
@@ -706,6 +845,7 @@ function isCached(tex) {
 function deckHeight(kind, typeId) {
   if (kind === 'box') return 0.16;
   if (/^flatbed/.test(typeId)) return 1.32;
+  if ((S().typeOf(typeId) || {}).van) return 0.58;
   if (kind === 'semi') return 1.26;
   return 1.12;
 }
@@ -794,6 +934,7 @@ function buildVehicle(world, sp, tr, opts) {
   const t = S().typeOf(sp.type) || { kind: 'box', id: 'container' };
   const kind = t.kind;
   const flat = /^flatbed/.test(t.id);
+  const van = !!t.van;
   const L = sp.l * MM;
   const W = sp.w * MM;
   const H = sp.h * MM;
@@ -802,7 +943,11 @@ function buildVehicle(world, sp, tr, opts) {
   const roles = S().roles(sp.type);
   const axles = sp.axles || [];
   const track = (sp.track > 0 ? sp.track : sp.w * 0.84) * MM;
-  const wheelR = 0.5;
+  const wheelR = van ? 0.33 : 0.5;
+  const VAN_COLOUR = 0xf1f2f3;
+  /* a van's shell is wider than its cargo floor: the wheels sit under it */
+  const outerW = van ? Math.max(W + 0.06, track + 0.24) : W;
+  const wallH = van ? H + 0.06 : H;
 
   /* floor */
   const floorMat = mat(0xffffff, { map: floorTexture(L, W), roughness: 0.6, metalness: 0.2 });
@@ -811,24 +956,36 @@ function buildVehicle(world, sp, tr, opts) {
   /* walls: open towards the viewer (inner faces only, no roof), or closed */
   if (!flat) {
     /* a container has corrugated steel walls; a van body white panels */
-    const wall = (span) => mat(0xffffff, {
-      map: kind === 'box' ? wallTexture(span / 0.3, 1) : panelTexture(span / 1.15),
-      side: closed ? THREE.FrontSide : THREE.BackSide
-    });
+    /* a van's body is its painted shell */
+    const wall = (span) => van
+      ? mat(0xe6e9ec, { metalness: 0.3, roughness: 0.4, envMap: studio, side: closed ? THREE.FrontSide : THREE.BackSide })
+      : mat(0xffffff, {
+        map: kind === 'box' ? wallTexture(span / 0.3, 1) : panelTexture(span / 1.15),
+        side: closed ? THREE.FrontSide : THREE.BackSide
+      });
     const wallMats = [
       wall(W), /* +x rear doors */
       wall(W), /* -x front wall */
-      closed ? mat(0xe4e7ea) : new THREE.MeshBasicMaterial({ visible: false }), /* roof */
+      closed ? (van ? wall(L) : mat(0xe4e7ea)) : new THREE.MeshBasicMaterial({ visible: false }), /* roof */
       new THREE.MeshBasicMaterial({ visible: false }), /* floor drawn above */
       wall(L),
       wall(L)
     ];
-    const walls = new THREE.Mesh(new THREE.BoxGeometry(L, H, W), wallMats);
-    walls.position.set(L / 2, deck + H / 2, cz);
+    const walls = new THREE.Mesh(new THREE.BoxGeometry(L, wallH, outerW), wallMats);
+    walls.position.set(L / 2, deck + wallH / 2, cz);
     walls.castShadow = closed;
     walls.receiveShadow = true;
     world.add(walls);
-    if (closed && kind !== 'box') bodyFrame(world, L, W, H, deck, cz);
+    if (closed && kind !== 'box' && !van) bodyFrame(world, L, W, H, deck, cz);
+    if (closed && van) {
+      /* a flat white side on a white page needs its outline */
+      const edges = new THREE.LineSegments(
+        new THREE.EdgesGeometry(new THREE.BoxGeometry(L, wallH, outerW)),
+        new THREE.LineBasicMaterial({ color: 0xa9afb5 })
+      );
+      edges.position.copy(walls.position);
+      world.add(edges);
+    }
   }
   /* frame of the cargo space */
   if (!closed || flat) {
@@ -853,7 +1010,30 @@ function buildVehicle(world, sp, tr, opts) {
   const guardMat = mat(0x8f949a, { metalness: 0.45, roughness: 0.4, envMap: studio });
   let minX = 0;
   let maxX = L;
-  if (kind !== 'box') {
+  if (van) {
+    const fronts = [];
+    const rears = [];
+    axles.forEach((a, i) => {
+      const x = a.dist * MM;
+      const front = roles[i] && roles[i].role === 'front';
+      axle(world, x, cz, track, wheelR, false);
+      (front ? fronts : rears).push(x);
+      minX = Math.min(minX, x - wheelR);
+      maxX = Math.max(maxX, x + wheelR);
+    });
+    const xFront = Math.min(-1.2, (fronts.length ? Math.min(...fronts) : -1.4) - 0.85);
+    vanBody(world, {
+      xFront, top: deck + wallH, deck, width: outerW, cz, L,
+      colour: VAN_COLOUR, fronts, rears, wheelR
+    });
+    /* tall tail lights at the rear corners */
+    [1, -1].forEach((side) => {
+      box(world, 0.04, 0.5, 0.12, L + 0.02, deck + 0.42, cz + side * (outerW / 2 - 0.07),
+        mat(0xc8302a, { emissive: 0x5a0e0b, roughness: 0.3 }), false);
+    });
+    box(world, 0.12, 0.2, outerW + 0.02, L + 0.04, 0.42, cz, mat(0x3b3f44, { roughness: 0.55 })); /* rear bumper */
+    minX = Math.min(minX, xFront - 0.1);
+  } else if (kind !== 'box') {
     /* the frame rails reach every wheel, even one typed outside the body,
        so nothing floats while the form is being filled in */
     const wheelXs = axles.filter((a, i) => !(roles[i] && roles[i].role === 'kingpin')).map((a) => a.dist * MM);
@@ -966,7 +1146,7 @@ function buildVehicle(world, sp, tr, opts) {
     minX = Math.min(minX, front - 0.1);
   }
 
-  return { deck, W, H, kind, tractor: tr, minX, maxX };
+  return { deck, W, H, kind, van, tractor: tr, minX, maxX };
 }
 
 function update(data) {
@@ -989,9 +1169,40 @@ function update(data) {
   const minX = v.minX;
   const maxX = v.maxX;
 
-  /* cargo */
+  boxGroups = addCargo(world, data, deck);
+  deckY = deck;
+  ghost(null);
+
+  scene.add(world);
+
+  const top = Math.max(deck + H + 0.1, (kind === 'lorry' && !v.van) || tr ? 3.9 : 0);
+  bounds = {
+    min: new THREE.Vector3(minX, 0, -W - 0.4),
+    max: new THREE.Vector3(maxX, top, 0.4)
+  };
+
+  /* the sun from the front left, high; its shadow box fits the vehicle */
+  const centre = bounds.min.clone().add(bounds.max).multiplyScalar(0.5);
+  const size = bounds.max.clone().sub(bounds.min);
+  const reach = Math.max(size.x, size.z) * 0.75 + 3;
+  sun.position.set(centre.x - reach * 0.55, reach * 1.4, centre.z + reach * 0.9);
+  sun.target.position.copy(centre);
+  const sc = sun.shadow.camera;
+  sc.left = -reach;
+  sc.right = reach;
+  sc.top = reach;
+  sc.bottom = -reach;
+  sc.near = 0.5;
+  sc.far = reach * 4;
+  sc.updateProjectionMatrix();
+}
+
+/* The placed boxes, one instanced mesh per item and size, with their dark
+   edges. Returns { id, materials } per mesh for the selection highlight. */
+function addCargo(world, data, deck) {
   const names = data.names || {};
   const palette = data.palette || {};
+  const boxGroups = [];
   const groups = new Map();
   (data.placed || []).forEach((b) => {
     const key = b.id + '|' + b.l + '|' + b.w + '|' + b.h;
@@ -1039,36 +1250,14 @@ function update(data) {
     mesh.castShadow = true;
     mesh.receiveShadow = true;
     world.add(mesh);
-    boxGroups.push({ id: g.id, materials });
+    boxGroups.push({ id: g.id, materials, mesh, boxes: g.boxes });
   });
   if (edgePos.length) {
     const eg = new THREE.BufferGeometry();
     eg.setAttribute('position', new THREE.Float32BufferAttribute(edgePos, 3));
     world.add(new THREE.LineSegments(eg, new THREE.LineBasicMaterial({ color: 0x15181b, transparent: true, opacity: 0.7 })));
   }
-
-  scene.add(world);
-
-  const top = Math.max(deck + H, kind === 'lorry' || tr ? 3.9 : 0);
-  bounds = {
-    min: new THREE.Vector3(minX, 0, -W - 0.4),
-    max: new THREE.Vector3(maxX, top, 0.4)
-  };
-
-  /* the sun from the front left, high; its shadow box fits the vehicle */
-  const centre = bounds.min.clone().add(bounds.max).multiplyScalar(0.5);
-  const size = bounds.max.clone().sub(bounds.min);
-  const reach = Math.max(size.x, size.z) * 0.75 + 3;
-  sun.position.set(centre.x - reach * 0.55, reach * 1.4, centre.z + reach * 0.9);
-  sun.target.position.copy(centre);
-  const sc = sun.shadow.camera;
-  sc.left = -reach;
-  sc.right = reach;
-  sc.top = reach;
-  sc.bottom = -reach;
-  sc.near = 0.5;
-  sc.far = reach * 4;
-  sc.updateProjectionMatrix();
+  return boxGroups;
 }
 
 /* -------------------------------------------------------------- selection --- */
@@ -1139,6 +1328,69 @@ function render(view, selected) {
   renderer.render(scene, camera);
 }
 
+/* ------------------------------------------------------- manual editing --- */
+/* The planner's manual mode moves boxes with the pointer. pick() finds the
+   box under it (the planner's own box object), floorPoint() where the
+   pointer meets a level plane at a height above the floor (planner mm), and
+   ghost() shows a box at a planner position: 'ok' (green, it fits), 'bad'
+   (red) or 'mark' (amber outline, the box chosen for the keyboard). */
+let deckY = 0;
+let ghostObj = null;
+const raycaster = new THREE.Raycaster();
+
+function pointerNdc(clientX, clientY) {
+  const r = host.getBoundingClientRect();
+  return new THREE.Vector2(((clientX - r.left) / r.width) * 2 - 1, -((clientY - r.top) / r.height) * 2 + 1);
+}
+
+function pick(clientX, clientY) {
+  if (!renderer || !camera || !host || !boxGroups.length) return null;
+  raycaster.setFromCamera(pointerNdc(clientX, clientY), camera);
+  const hits = raycaster.intersectObjects(boxGroups.map((g) => g.mesh), false);
+  for (const hit of hits) {
+    if (hit.instanceId === undefined) continue;
+    const g = boxGroups.find((b) => b.mesh === hit.object);
+    if (g && g.boxes[hit.instanceId]) return g.boxes[hit.instanceId];
+  }
+  return null;
+}
+
+function floorPoint(clientX, clientY, heightMm) {
+  if (!renderer || !camera || !host) return null;
+  raycaster.setFromCamera(pointerNdc(clientX, clientY), camera);
+  const plane = new THREE.Plane(new THREE.Vector3(0, 1, 0), -(deckY + (heightMm || 0) * MM));
+  const p = new THREE.Vector3();
+  if (!raycaster.ray.intersectPlane(plane, p)) return null;
+  return { x: p.x / MM, z: -p.z / MM };
+}
+
+function ghost(b, look) {
+  if (ghostObj) {
+    if (scene) scene.remove(ghostObj);
+    ghostObj.traverse((o) => {
+      if (o.geometry) o.geometry.dispose();
+      if (o.material) o.material.dispose();
+    });
+    ghostObj = null;
+  }
+  if (!b || !scene) return;
+  /* vivid, so it stands out even over boxes of the same colour */
+  const colour = look === 'bad' ? 0xe02424 : look === 'mark' ? 0xf0a000 : 0x00c853;
+  const g = new THREE.Group();
+  /* a hair larger than the box, so its outline is not hidden by it */
+  const geo = new THREE.BoxGeometry(b.l * MM + 0.012, b.h * MM + 0.012, b.w * MM + 0.012);
+  if (look !== 'mark') {
+    g.add(new THREE.Mesh(geo, new THREE.MeshBasicMaterial({ color: colour, transparent: true, opacity: 0.55, depthWrite: false })));
+  }
+  const edges = new THREE.LineSegments(new THREE.EdgesGeometry(geo),
+    new THREE.LineBasicMaterial({ color: look === 'mark' ? colour : look === 'bad' ? 0x5a0b0b : 0x0b3d1c, depthTest: look !== 'mark' }));
+  edges.renderOrder = 2;
+  g.add(edges);
+  g.position.copy(toWorld(b.x + b.l / 2, b.y + b.h / 2, b.z + b.w / 2, deckY));
+  ghostObj = g;
+  scene.add(g);
+}
+
 /* ------------------------------------------------------------- side view --- */
 /* The form that creates a cargo space draws its measurements over a side
    view of the very same vehicle: the model above, built without cargo,
@@ -1146,7 +1398,14 @@ function render(view, selected) {
    scale. It has its own small renderer, so the planner's view is left
    alone. side() returns { url, minX, maxX, height, deck, pxPerMm, width,
    heightPx }: the picture (a PNG data URL) and where it sits in mm, with
-   the ground at its bottom edge. */
+   the ground at its bottom edge.
+
+   opts (optional), for the axle-load picture of the plan:
+     tractor  the tractor pulling a semitrailer
+     placed   the planned boxes (+ names, palette as in update()); the body
+              is then cut open towards the viewer so the cargo shows
+     canvas   true: skip the PNG and hand back `canvas`, the renderer's own
+              canvas, to be drawn at once (the next side() call repaints it) */
 let sideKit = null;
 
 function sideRenderer() {
@@ -1163,8 +1422,9 @@ function sideRenderer() {
   return sideKit;
 }
 
-function side(space, maxW, maxH) {
+function side(space, maxW, maxH, opts) {
   if (!renderer || !space) return null;
+  opts = opts || {};
   let kit;
   try {
     kit = sideRenderer();
@@ -1174,9 +1434,11 @@ function side(space, maxW, maxH) {
   const group = new THREE.Group();
   const mainStudio = studio;
   studio = kit.env; /* the paint reflects the studio of this renderer */
+  const withCargo = Array.isArray(opts.placed);
   let v;
   try {
-    v = buildVehicle(group, space, null, { closed: true });
+    v = buildVehicle(group, space, opts.tractor || null, { closed: !withCargo });
+    if (withCargo) addCargo(group, opts, v.deck);
   } finally {
     studio = mainStudio;
   }
@@ -1200,7 +1462,7 @@ function side(space, maxW, maxH) {
   cam.updateProjectionMatrix();
   kit.scene.add(group);
   kit.r.render(kit.scene, cam);
-  const url = kit.r.domElement.toDataURL('image/png');
+  const url = opts.canvas ? null : kit.r.domElement.toDataURL('image/png');
   kit.scene.remove(group);
   group.traverse((o) => {
     if (o.geometry) o.geometry.dispose();
@@ -1212,6 +1474,7 @@ function side(space, maxW, maxH) {
   });
   return {
     url,
+    canvas: opts.canvas ? kit.r.domElement : null,
     minX: minX / MM,
     maxX: (minX + w / scale) / MM,
     height: hPx / scale / MM,
@@ -1222,7 +1485,120 @@ function side(space, maxW, maxH) {
   };
 }
 
-const api = { active: false, attach, update, render, side };
+/* ------------------------------------------------------------- snapshots --- */
+/* Pictures for the loading-order document: the vehicle with its body cut
+   open, the boxes loaded so far, the boxes of the current step marked in
+   amber. Its own renderer, white background (the picture goes into a PDF
+   as a JPEG).
+   o: { space, tractor, placed, names, palette, mark: [boxes], width, height,
+        whole (frame the whole vehicle, not just the cargo space),
+        az, elev (the angles of the planner's view; default: from behind on
+        the left, looking into the cargo space towards the far end) }
+   Returns { url (JPEG data URL), width, height } or null. */
+let snapKit = null;
+
+function snapRenderer() {
+  if (snapKit) return snapKit;
+  const canvas = document.createElement('canvas');
+  const r = new THREE.WebGLRenderer({ canvas, antialias: true, alpha: false, preserveDrawingBuffer: true });
+  r.outputColorSpace = THREE.SRGBColorSpace;
+  r.setClearColor(0xffffff, 1);
+  const sc = new THREE.Scene();
+  sc.add(new THREE.HemisphereLight(0xffffff, 0x9aa1a8, 2.1));
+  const light = new THREE.DirectionalLight(0xffffff, 2.0);
+  light.position.set(25, 30, 22);
+  sc.add(light);
+  snapKit = { r, scene: sc, env: makeStudio(r), cam: new THREE.PerspectiveCamera(30, 1, 0.1, 600) };
+  return snapKit;
+}
+
+function snapshot(o) {
+  if (!renderer || !o || !o.space) return null;
+  let kit;
+  try {
+    kit = snapRenderer();
+  } catch (e) {
+    return null;
+  }
+  const group = new THREE.Group();
+  const mainStudio = studio;
+  studio = kit.env;
+  let v;
+  try {
+    v = buildVehicle(group, o.space, o.tractor || null, { closed: false });
+    addCargo(group, { placed: o.placed || [], names: o.names, palette: o.palette }, v.deck);
+  } finally {
+    studio = mainStudio;
+  }
+  /* the boxes of this step */
+  (o.mark || []).forEach((b) => {
+    const geo = new THREE.BoxGeometry(b.l * MM + 0.02, b.h * MM + 0.02, b.w * MM + 0.02);
+    const c = toWorld(b.x + b.l / 2, b.y + b.h / 2, b.z + b.w / 2, v.deck);
+    const fill = new THREE.Mesh(geo, new THREE.MeshBasicMaterial({ color: 0xffa000, transparent: true, opacity: 0.3, depthWrite: false }));
+    fill.position.copy(c);
+    group.add(fill);
+    const edges = new THREE.LineSegments(new THREE.EdgesGeometry(geo), new THREE.LineBasicMaterial({ color: 0xe65100 }));
+    edges.position.copy(c);
+    group.add(edges);
+  });
+
+  const w = Math.max(16, Math.round(o.width || 800));
+  const h = Math.max(16, Math.round(o.height || 450));
+  kit.r.setPixelRatio(1);
+  kit.r.setSize(w, h, false);
+
+  const L = o.space.l * MM;
+  const H = o.space.h * MM;
+  const W = o.space.w * MM;
+  /* the whole vehicle, or the cargo space up to frameTo mm from the far end */
+  const reach = o.frameTo > 0 ? Math.min(L, o.frameTo * MM) : L;
+  const frame = o.whole || !(L > 0)
+    ? new THREE.Box3().setFromObject(group)
+    : new THREE.Box3(new THREE.Vector3(0, v.deck, -W), new THREE.Vector3(reach, v.deck + H, 0));
+  const centre = frame.getCenter(new THREE.Vector3());
+  const az = typeof o.az === 'number' ? o.az : -0.72;
+  const elev = typeof o.elev === 'number' ? o.elev : 0.5;
+  const dir = new THREE.Vector3(Math.cos(elev) * Math.cos(az), Math.sin(elev), -Math.cos(elev) * Math.sin(az)).normalize();
+  const cam = kit.cam;
+  cam.aspect = w / h;
+  cam.up.set(0, 1, 0);
+  cam.position.copy(centre).addScaledVector(dir, 10);
+  cam.lookAt(centre);
+  cam.updateMatrixWorld();
+  /* the nearest distance that keeps every corner of the frame in view */
+  const tanV = Math.tan((cam.fov * Math.PI) / 360) * 0.92;
+  const tanH = tanV * cam.aspect;
+  const right = new THREE.Vector3().setFromMatrixColumn(cam.matrixWorld, 0);
+  const up = new THREE.Vector3().setFromMatrixColumn(cam.matrixWorld, 1);
+  let fit = 0;
+  for (let i = 0; i < 8; i++) {
+    const p = new THREE.Vector3(i & 1 ? frame.max.x : frame.min.x, i & 2 ? frame.max.y : frame.min.y, i & 4 ? frame.max.z : frame.min.z).sub(centre);
+    const toward = p.dot(dir);
+    fit = Math.max(fit, toward + Math.abs(p.dot(right)) / tanH, toward + Math.abs(p.dot(up)) / tanV);
+  }
+  const radius = frame.max.clone().sub(frame.min).length() / 2;
+  cam.position.copy(centre).addScaledVector(dir, fit);
+  cam.lookAt(centre);
+  cam.near = Math.max(0.05, fit - radius * 3);
+  cam.far = fit + radius * 4 + 40;
+  cam.updateProjectionMatrix();
+
+  kit.scene.add(group);
+  kit.r.render(kit.scene, cam);
+  const url = kit.r.domElement.toDataURL('image/jpeg', 0.9);
+  kit.scene.remove(group);
+  group.traverse((obj) => {
+    if (obj.geometry) obj.geometry.dispose();
+    const ms = obj.material ? (Array.isArray(obj.material) ? obj.material : [obj.material]) : [];
+    ms.forEach((m) => {
+      if (m.map && !isCached(m.map)) m.map.dispose();
+      m.dispose();
+    });
+  });
+  return { url, width: w, height: h };
+}
+
+const api = { active: false, attach, update, render, side, pick, floorPoint, ghost, snapshot };
 window.SyncrofinScene = api;
 
 function boot() {

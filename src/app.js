@@ -14,13 +14,36 @@
      arithmetic. */
   var Spaces = window.SyncrofinSpaces;
 
-  var PALETTE = {
-    blue: '#5fc2ea',
-    yellow: '#fec528',
-    green: '#8fc98a',
-    orange: '#f0a35e',
-    grey: '#bfc1c5'
-  };
+  /* The box colours: key, hex, name in the list. The first five are the
+     original ones (saved plans and spreadsheets use their keys). */
+  var COLORS = [
+    ['blue', '#5fc2ea', 'Azul'],
+    ['yellow', '#fec528', 'Amarelo'],
+    ['green', '#8fc98a', 'Verde'],
+    ['orange', '#f0a35e', 'Laranja'],
+    ['grey', '#bfc1c5', 'Cinza'],
+    ['red', '#e8686b', 'Vermelho'],
+    ['pink', '#f29cc3', 'Rosa'],
+    ['purple', '#a98bd8', 'Roxo'],
+    ['lilac', '#d2bdf0', 'Lilás'],
+    ['navy', '#3f6fc4', 'Azul-escuro'],
+    ['teal', '#45b8a6', 'Verde-água'],
+    ['cyan', '#9fe6ee', 'Ciano'],
+    ['lime', '#c6df5a', 'Verde-limão'],
+    ['darkgreen', '#4c9457', 'Verde-escuro'],
+    ['olive', '#a3a85c', 'Oliva'],
+    ['brown', '#b0825a', 'Marrom'],
+    ['beige', '#e8d5b0', 'Bege'],
+    ['salmon', '#f7a891', 'Salmão'],
+    ['gold', '#d6a93a', 'Dourado'],
+    ['wine', '#a3445a', 'Vinho'],
+    ['graphite', '#767c84', 'Grafite'],
+    ['white', '#f2f3f4', 'Branco']
+  ];
+  var PALETTE = {};
+  COLORS.forEach(function (c) {
+    PALETTE[c[0]] = c[1];
+  });
 
   var DEMO = [
     { name: 'Palete EUR', l: 1200, w: 800, h: 1450, weight: 420, qty: 12, color: 'blue', dest: 'FruitPlanet Corp' },
@@ -62,6 +85,12 @@
     shift: 0, /* mm the load was slid back to relieve an axle */
     progress: null, /* the search for a better plan: { tries, elapsed, done } */
     stops: [], /* destinations in delivery order */
+    mode: 'itinerario', /* normal | cliente | itinerario, see loadplan.js */
+    blocks: null, /* mode cliente: the clients from the front wall to the doors */
+    control: 'auto', /* auto: the planner arranges the load; manual: the operator moves boxes */
+    picked: null, /* manual: index in placed of the box the keyboard moves */
+    manualEdited: false, /* manual: the operator moved something since the last plan */
+    drag: null, /* manual: the box being dragged and where it would land */
     rules: null, /* see loadplan.js; null = the defaults */
     selected: null,
     view: { az: -2.3, elev: 0.4, zoom: 1 }
@@ -140,7 +169,14 @@
           tractor: state.tractorId,
           items: state.items,
           stops: state.stops,
-          rules: state.rules
+          mode: state.mode,
+          rules: state.rules,
+          control: state.control,
+          /* by hand the positions are the plan: keep them */
+          placed: state.control === 'manual' ? state.placed.map(function (b) {
+            return { id: b.id, x: b.x, y: b.y, z: b.z, l: b.l, w: b.w, h: b.h };
+          }) : undefined,
+          edited: state.control === 'manual' ? state.manualEdited : undefined
         })
       );
     } catch (e) {
@@ -189,6 +225,16 @@
         });
       }
       if (data.rules && typeof data.rules === 'object') state.rules = LoadPlan.cleanRules(data.rules);
+      state.mode = LoadPlan.cleanMode(data.mode);
+      if (data.control === 'manual') {
+        state.control = 'manual';
+        state.manualEdited = !!data.edited;
+        state.placed = Array.isArray(data.placed) ? data.placed.filter(function (b) {
+          return b && ['x', 'y', 'z', 'l', 'w', 'h'].every(function (k) {
+            return typeof b[k] === 'number' && isFinite(b[k]);
+          });
+        }) : [];
+      }
       return true;
     } catch (e) {
       return false;
@@ -212,6 +258,7 @@
       tractor: currentTractor(),
       items: state.items,
       stops: state.stops,
+      mode: state.mode,
       rules: state.rules
     };
   }
@@ -222,6 +269,7 @@
     state.totals = result.totals;
     state.check = result.check;
     state.shift = result.shift || 0;
+    state.blocks = result.blocks || null;
   }
 
   /* ------------------------------------------------------------ projection --- */
@@ -355,6 +403,9 @@
         gl.update(sceneData());
         sceneDirty = false;
       }
+      /* manual mode: where the dragged box would land, or the chosen box */
+      var mark = state.drag && state.drag.at ? state.drag.at : state.picked !== null ? state.placed[state.picked] : null;
+      if (gl.ghost) gl.ghost(state.control === 'manual' ? mark : null, state.drag && state.drag.at ? (state.drag.ok ? 'ok' : 'bad') : 'mark');
       gl.render(state.view, state.selected);
       canvas.setAttribute(
         'aria-label',
@@ -563,6 +614,13 @@
     if (state.shift > 0) {
       els.status.textContent += ' Carga recuada ' + fmt(state.shift) + ' mm para aliviar um eixo.';
     }
+    if (state.control === 'manual' && state.items.length) {
+      var gl = window.SyncrofinScene;
+      els.status.textContent += gl && gl.active
+        ? ' Modo manual: arraste os volumes com o mouse; clique num volume e use as setas para ajustar e R para girar.' +
+          (state.unplaced.length ? ' Carregar encaixa os que ficaram de fora no espaço livre.' : '')
+        : ' O ajuste manual precisa da vista 3D (WebGL), que este navegador não tem.';
+    }
 
     var tractor = currentTractor();
     els.dims.textContent =
@@ -604,9 +662,17 @@
         head.className = 'group-head';
         var title = document.createElement('span');
         title.className = 'group-title';
-        title.textContent = (several ? 'Entrega ' + (gi + 1) + ' · ' : '') + (group.name || 'Sem destino');
+        var route = state.mode === 'itinerario';
+        var prefix = '';
+        if (several && route) prefix = 'Entrega ' + (gi + 1) + ' · ';
+        if (several && state.mode === 'cliente' && state.blocks) {
+          /* the block the search chose for this client, counted from the front */
+          var bi = state.blocks.indexOf(group.name);
+          if (bi >= 0) prefix = 'Bloco ' + (bi + 1) + (bi === 0 ? ' (frente)' : bi === state.blocks.length - 1 ? ' (portas)' : '') + ' · ';
+        }
+        title.textContent = prefix + (group.name || 'Sem destino');
         head.appendChild(title);
-        if (several) {
+        if (several && route) {
           /* the delivery order decides the loading: the last delivery goes in first */
           [['up', '↑', 'Entregar antes'], ['down', '↓', 'Entregar depois']].forEach(function (b) {
             var btn = document.createElement('button');
@@ -710,9 +776,136 @@
 
   var AXLE_COLORS = { over: '#d64545', warn: '#e4a934', ok: '#5f9e54' };
 
+  /* The axle loads over a side view of the 3D vehicle with its cargo, cut
+     open on the near side (SyncrofinScene.side): a broad arrow comes down on
+     every axle, its length the share of the axle's limit, in the colour of
+     its status, with the load under the wheel; a thin blue one marks the
+     centre of gravity. Returns false when there is no WebGL picture. */
+  function drawAxle3d(cv, res) {
+    var gl = window.SyncrofinScene;
+    if (!gl || !gl.active || !gl.side) return false;
+    var cssW = cv.clientWidth || (cv.parentNode && cv.parentNode.clientWidth) || 720;
+    var padT = 30;
+    var padB = res.rows.length ? 44 : 30;
+    var view = null;
+    try {
+      view = gl.side(currentVehicle(), Math.max(120, cssW - 24), 230, Object.assign({ canvas: true }, sceneData()));
+    } catch (e) {
+      view = null;
+    }
+    if (!view || !view.canvas) return false;
+
+    var cssH = padT + view.heightPx + padB;
+    var dpr = window.devicePixelRatio || 1;
+    cv.style.height = cssH + 'px';
+    cv.width = Math.round(cssW * dpr);
+    cv.height = Math.round(cssH * dpr);
+    var ac = cv.getContext('2d');
+    if (!ac) return false;
+    ac.setTransform(dpr, 0, 0, dpr, 0, 0);
+    ac.clearRect(0, 0, cssW, cssH);
+
+    var offX = Math.round((cssW - view.width) / 2);
+    var ground = padT + view.heightPx;
+    var k = view.pxPerMm;
+    function X(mm) {
+      return offX + (mm - view.minX) * k;
+    }
+    ac.drawImage(view.canvas, offX, padT, view.width, view.heightPx);
+    ac.strokeStyle = '#c3c8ce';
+    ac.lineWidth = 1.5;
+    ac.beginPath();
+    ac.moveTo(8, ground + 0.5);
+    ac.lineTo(cssW - 8, ground + 0.5);
+    ac.stroke();
+
+    var deckY = ground - view.deck * k;
+    var wheelY = ground - 500 * k; /* wheel centres: the model's wheels are 1 m across */
+
+    function arrow(x, yTop, yTip, shaft, head, colour) {
+      var headH = Math.min(head * 0.9, (yTip - yTop) * 0.6);
+      ac.beginPath();
+      ac.moveTo(x - shaft / 2, yTop);
+      ac.lineTo(x + shaft / 2, yTop);
+      ac.lineTo(x + shaft / 2, yTip - headH);
+      ac.lineTo(x + head / 2, yTip - headH);
+      ac.lineTo(x, yTip);
+      ac.lineTo(x - head / 2, yTip - headH);
+      ac.lineTo(x - shaft / 2, yTip - headH);
+      ac.closePath();
+      ac.fillStyle = colour;
+      ac.fill();
+    }
+
+    /* centre of gravity of the cargo */
+    if (res.totalW > 0) {
+      var cgx = X(res.cgx);
+      ac.globalAlpha = 0.85;
+      arrow(cgx, padT - 8, deckY, 4, 12, '#5fc2ea');
+      ac.globalAlpha = 1;
+      ac.font = '700 12px Arial, Tahoma, Verdana, sans-serif';
+      ac.textAlign = 'center';
+      ac.fillStyle = '#2b8fb8';
+      ac.fillText('CG', cgx, padT - 13);
+    }
+
+    if (!res.rows.length) {
+      ac.font = '12px Arial, Tahoma, Verdana, sans-serif';
+      ac.textAlign = 'center';
+      ac.fillStyle = '#5d5d5d';
+      ac.fillText('Sem eixos próprios: escolha um caminhão, reboque ou semirreboque para ver as cargas por eixo.', cssW / 2, ground + 20);
+      return true;
+    }
+
+    var shown = res.rows.filter(function (r) {
+      return !r.info; /* a kingpin resting on the tractor: its load is on the tractor's axles */
+    });
+    /* close axles (a tandem 1.3 m apart on a phone) get shorter labels and two rows */
+    var gap = Infinity;
+    for (var i = 1; i < shown.length; i++) gap = Math.min(gap, Math.abs(shown[i].x - shown[i - 1].x) * k);
+    var tight = gap < 64;
+    var shaft = Math.max(6, Math.min(16, gap * 0.28));
+    var head = Math.max(14, Math.min(34, gap * 0.62));
+    var full = Math.max(30, wheelY - (padT - 4));
+
+    ac.font = '700 ' + (tight ? 10.5 : 11.5) + 'px Arial, Tahoma, Verdana, sans-serif';
+    ac.textAlign = 'center';
+    ac.textBaseline = 'middle';
+    var lastRight = [-Infinity, -Infinity];
+    shown.forEach(function (r) {
+      var x = X(r.x);
+      var kingpin = r.part === 'kingpin';
+      var tip = kingpin ? deckY : wheelY;
+      var share = r.max > 0 ? Math.min(1, r.load / r.max) : 0.5;
+      var len = Math.max(26, (kingpin ? full - (wheelY - deckY) : full) * (0.35 + 0.65 * share));
+      ac.globalAlpha = 0.78;
+      arrow(x, tip - len, tip, shaft, head, AXLE_COLORS[r.status] || AXLE_COLORS.ok);
+      ac.globalAlpha = 1;
+
+      var text = (kingpin ? 'PR ' : '') + (tight && r.load >= 1000 ? fmt(r.load / 1000, 1) + ' t' : fmt(r.load) + ' kg');
+      var tw = ac.measureText(text).width + 10;
+      var row = x - tw / 2 < lastRight[0] + 3 ? 1 : 0;
+      if (row === 1 && x - tw / 2 < lastRight[1] + 3) row = 0;
+      lastRight[row] = x + tw / 2;
+      var ly = ground + 11 + row * 18;
+      ac.fillStyle = r.status === 'over' ? '#b83232' : '#2f3337';
+      ac.fillRect(Math.round(x - tw / 2), ly - 8, Math.round(tw), 16);
+      ac.fillStyle = '#ffffff';
+      ac.fillText(text, x, ly + 0.5);
+    });
+    ac.textBaseline = 'alphabetic';
+    return true;
+  }
+
+  function drawAxlePicture() {
+    if (els.axleCanvas) drawAxle(computeAxles(currentVehicle(), state.placed));
+  }
+
   function drawAxle(res) {
     var cv = els.axleCanvas;
     if (!cv) return;
+    if (drawAxle3d(cv, res)) return;
+    cv.style.height = '';
     var vehicle = currentVehicle();
     var tractor = currentTractor();
     var kind = (Spaces.typeOf(vehicle.type) || {}).kind;
@@ -928,7 +1121,7 @@
         text += ' · peso bruto ' + fmt(res.gross.load) + ' kg' + (res.gross.max ? ' (máx. ' + fmt(res.gross.max) + ' kg)' : '');
       }
       if (Spaces.takesTractor(vehicle) && !currentTractor()) {
-        text += ' · sem cavalo: só se calcula a carga no pino-rei.';
+        text += ' · sem cavalo: só é calculada a carga no pino-rei.';
       }
       els.axleCog.textContent = text;
     }
@@ -1033,7 +1226,16 @@
 
   function runPlan() {
     if (search) search.cancel();
+    search = null;
     state.progress = null;
+    if (state.control === 'manual') {
+      /* by hand: what the operator placed stays, the rest goes around it */
+      applyPlan(LoadPlan.fill(planInput(), state.placed));
+      state.picked = null; /* the boxes may come back in another order */
+      save();
+      showPlan();
+      return;
+    }
     search = LoadPlan.start(planInput(), function (best, progress) {
       state.progress = progress;
       if (progress.improved) {
@@ -1122,9 +1324,26 @@
       setMenu(false);
     },
     /* the WebGL view arrived: build its scene and draw */
+    /* what the loading-order document (loaddoc.js) prints */
+    docData: function () {
+      var data = sceneData();
+      data.items = state.items;
+      data.unplaced = state.unplaced;
+      data.totals = state.totals;
+      data.check = state.check;
+      data.mode = state.mode;
+      data.control = state.control;
+      data.stops = state.stops;
+      data.rules = LoadPlan.cleanRules(state.rules);
+      data.colorLabels = COLOR_LABEL;
+      data.view = { az: state.view.az, elev: state.view.elev };
+      return data;
+    },
     redraw: function () {
       sceneDirty = true;
       draw();
+      drawAxlePicture(); /* the WebGL view may have just arrived */
+      renderStatus(); /* and with it the manual mode */
     }
   };
 
@@ -1146,7 +1365,7 @@
       return;
     }
     if (l < 50 || w < 50 || h < 20) {
-      els.formMsg.textContent = 'As medidas têm de ser pelo menos 50 × 50 × 20 mm.';
+      els.formMsg.textContent = 'As medidas precisam ser de pelo menos 50 × 50 × 20 mm.';
       return;
     }
     if (l > vehicle.l || w > vehicle.w || h > vehicle.h) {
@@ -1155,14 +1374,14 @@
       return;
     }
     if (qty < 1 || qty > 500) {
-      els.formMsg.textContent = 'A quantidade tem de ficar entre 1 e 500.';
+      els.formMsg.textContent = 'A quantidade deve ficar entre 1 e 500.';
       return;
     }
 
     var maxTopRaw = els.maxTop ? String(els.maxTop.value).trim() : '';
     var maxTop = maxTopRaw === '' ? null : Math.round(num(maxTopRaw, NaN));
     if (maxTopRaw !== '' && !(maxTop >= 0 && maxTop <= 100000)) {
-      els.formMsg.textContent = 'O peso máximo em cima tem de ficar entre 0 e 100 000 kg (vazio = sem limite).';
+      els.formMsg.textContent = 'O peso máximo em cima deve ficar entre 0 e 100 000 kg (vazio = sem limite).';
       return;
     }
 
@@ -1212,15 +1431,24 @@
 
   var IMPORT_MAX_BYTES = 10 * 1024 * 1024;
 
+  /* colour words a spreadsheet may use (lower case, without accents), besides
+     each colour's key and name */
   var COLOR_WORDS = {
-    azul: 'blue', blue: 'blue',
-    amarelo: 'yellow', amarela: 'yellow', yellow: 'yellow',
-    verde: 'green', green: 'green',
-    laranja: 'orange', orange: 'orange',
-    cinza: 'grey', cinzento: 'grey', grey: 'grey', gray: 'grey'
+    amarela: 'yellow', cinzento: 'grey', gray: 'grey', vermelha: 'red', roxa: 'purple', violeta: 'purple',
+    lilas: 'lilac', 'azul escuro': 'navy', 'azul marinho': 'navy', marinho: 'navy', 'verde agua': 'teal',
+    turquesa: 'teal', 'verde limao': 'lime', limao: 'lime', 'verde escuro': 'darkgreen', 'verde oliva': 'olive',
+    castanho: 'brown', creme: 'beige', dourada: 'gold', ouro: 'gold', bordo: 'wine', bordeaux: 'wine',
+    preto: 'graphite', preta: 'graphite', 'cinza escuro': 'graphite', branca: 'white', magenta: 'pink',
+    purple: 'purple', violet: 'purple', black: 'graphite'
   };
-  var COLOR_CYCLE = ['blue', 'yellow', 'green', 'orange', 'grey'];
-  var COLOR_LABEL = { blue: 'Azul', yellow: 'Amarelo', green: 'Verde', orange: 'Laranja', grey: 'Cinza' };
+  var COLOR_CYCLE = [];
+  var COLOR_LABEL = {};
+  COLORS.forEach(function (c) {
+    COLOR_CYCLE.push(c[0]);
+    COLOR_LABEL[c[0]] = c[2];
+    COLOR_WORDS[c[0]] = c[0];
+    COLOR_WORDS[c[2].toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '').replace(/-/g, ' ')] = c[0];
+  });
 
   var FIELD_ALIASES = {
     name: ['descricao', 'desc', 'nome', 'item', 'produto', 'artigo', 'mercadoria', 'name', 'description', 'product'],
@@ -1409,7 +1637,7 @@
       weight = Math.round(weight * 100) / 100;
 
       var reason = null;
-      if (!isFinite(l) || !isFinite(w) || !isFinite(h)) reason = 'medidas em falta';
+      if (!isFinite(l) || !isFinite(w) || !isFinite(h)) reason = 'medidas faltando';
       else if (l < 50 || w < 50 || h < 20) reason = 'medidas abaixo de 50 × 50 × 20 mm';
       else if (l > vehicle.l || w > vehicle.w || h > vehicle.h) reason = 'não cabe no ' + vehicle.name;
       else if (qty < 1 || qty > 500) reason = 'quantidade fora de 1 a 500';
@@ -1419,8 +1647,9 @@
         continue;
       }
 
-      var colorWord = headerTokens(get(cells, 'color'))[0];
-      var color = COLOR_WORDS[colorWord] || COLOR_CYCLE[colorTurn++ % COLOR_CYCLE.length];
+      var colorTokens = headerTokens(get(cells, 'color'));
+      var color = COLOR_WORDS[colorTokens.join(' ')] || COLOR_WORDS[colorTokens[0]] ||
+        COLOR_CYCLE[colorTurn++ % COLOR_CYCLE.length];
       var name = cellText(get(cells, 'name')) || 'Volume ' + (items.length + 1);
 
       var maxTopRaw = parseNumber(get(cells, 'maxTop'));
@@ -1644,13 +1873,13 @@
     try {
       entries = readZip(bytes);
     } catch (e) {
-      return Promise.reject(new Error('O ficheiro .xlsx está danificado.'));
+      return Promise.reject(new Error('O arquivo .xlsx está corrompido.'));
     }
     if (!entries['xl/workbook.xml']) {
-      return Promise.reject(new Error('Este ficheiro não é uma planilha Excel (.xlsx). Guarde-a como .xlsx ou .csv.'));
+      return Promise.reject(new Error('Este arquivo não é uma planilha Excel (.xlsx). Salve-a como .xlsx ou .csv.'));
     }
     if (typeof DecompressionStream === 'undefined') {
-      return Promise.reject(new Error('Este navegador não abre ficheiros .xlsx. Guarde a planilha como .csv e importe de novo.'));
+      return Promise.reject(new Error('Este navegador não abre arquivos .xlsx. Salve a planilha como .csv e importe de novo.'));
     }
     return Promise.all([
       unzipText(entries, 'xl/workbook.xml'),
@@ -1676,7 +1905,7 @@
           return /^xl\/worksheets\/[^/]+\.xml$/.test(k);
         }).sort()[0];
       }
-      if (!sheetPath) throw new Error('A planilha não tem nenhuma folha.');
+      if (!sheetPath) throw new Error('A planilha não tem nenhuma aba.');
 
       var shared = [];
       var siRe = /<(?:\w+:)?si\b[^>]*?(?:\/>|>([\s\S]*?)<\/(?:\w+:)?si>)/g;
@@ -1695,12 +1924,12 @@
       return parseXlsx(bytes);
     }
     if (bytes.length >= 4 && bytes[0] === 0xd0 && bytes[1] === 0xcf && bytes[2] === 0x11 && bytes[3] === 0xe0) {
-      return Promise.reject(new Error('Ficheiros .xls antigos não são lidos. No Excel, guarde a planilha como .xlsx ou .csv.'));
+      return Promise.reject(new Error('Arquivos .xls antigos não são lidos. No Excel, salve a planilha como .xlsx ou .csv.'));
     }
     try {
       return Promise.resolve(parseCsv(decodeText(bytes)));
     } catch (e) {
-      return Promise.reject(new Error('Não consegui ler o ficheiro como CSV.'));
+      return Promise.reject(new Error('Não consegui ler o arquivo como CSV.'));
     }
   }
 
@@ -1736,7 +1965,7 @@
   function importFile(file) {
     if (!file) return Promise.resolve();
     if (file.size > IMPORT_MAX_BYTES) {
-      setMsg('O ficheiro tem mais de 10 MB. Importe uma planilha mais pequena.', false);
+      setMsg('O arquivo tem mais de 10 MB. Importe uma planilha menor.', false);
       return Promise.resolve();
     }
     setMsg('A ler ' + file.name + '…', true);
@@ -1831,20 +2060,151 @@
     draw();
   }
 
+  /* ------------------------------------------------------- manual mode --- */
+  /* Automático: the planner arranges the load. Manual: the plan stays as it
+     is and the operator moves boxes with the pointer (drag and drop) or the
+     keyboard; LoadPlan keeps it physical and reports the rules it breaks. */
+  function setControl(kind) {
+    kind = kind === 'manual' ? 'manual' : 'auto';
+    if (kind === state.control) return;
+    if (kind === 'auto' && state.manualEdited && typeof window.confirm === 'function' &&
+      !window.confirm('Voltar ao modo automático refaz o plano e descarta os ajustes manuais. Continuar?')) {
+      showControl();
+      return;
+    }
+    if (search) search.cancel();
+    search = null;
+    state.control = kind;
+    state.drag = null;
+    state.picked = null;
+    state.manualEdited = false;
+    state.progress = null;
+    showControl();
+    if (kind === 'auto') {
+      save();
+      runPlan();
+      return;
+    }
+    /* the plan as it is becomes the starting point */
+    applyPlan(LoadPlan.evaluate(planInput(), state.placed, state.unplaced));
+    save();
+    showPlan();
+  }
+
+  function showControl() {
+    Array.prototype.forEach.call(document.querySelectorAll('[data-control]'), function (b) {
+      var on = b.dataset.control === state.control;
+      b.classList.toggle('on', on);
+      b.setAttribute('aria-pressed', on ? 'true' : 'false');
+    });
+    if (els.canvas) els.canvas.classList.toggle('manual', state.control === 'manual');
+    var hint = document.querySelector('.hint-drag');
+    if (hint) {
+      hint.textContent = state.control === 'manual'
+        ? 'Arraste um volume para movê-lo · arraste o fundo para girar · R gira o volume escolhido'
+        : 'Arraste para girar · aproxime com a rodinha do mouse ou com dois dedos';
+    }
+  }
+
+  /* a box moved by hand: the load settles, the plan is checked again */
+  function commitBox(index, box) {
+    var next = state.placed.slice();
+    next[index] = box;
+    applyPlan(LoadPlan.evaluate(planInput(), next, state.unplaced));
+    state.picked = index;
+    state.selected = box.id;
+    state.manualEdited = true;
+    save();
+    showPlan();
+  }
+
+  function manualFlash(text) {
+    if (els.status) els.status.textContent = text;
+  }
+
+  /* arrows move the chosen box (100 mm, 10 mm with Shift), R turns it */
+  function manualKey(e) {
+    if (state.control !== 'manual' || state.picked === null || !state.placed[state.picked]) return false;
+    var t = e.target;
+    if (t && (t.tagName === 'INPUT' || t.tagName === 'SELECT' || t.tagName === 'TEXTAREA' || t.isContentEditable)) return false;
+    var b = state.placed[state.picked];
+    var step = e.shiftKey ? 10 : 100;
+    var dx = 0;
+    var dz = 0;
+    var turn = false;
+    if (e.key === 'ArrowLeft') dx = -step;
+    else if (e.key === 'ArrowRight') dx = step;
+    else if (e.key === 'ArrowUp') dz = -step;
+    else if (e.key === 'ArrowDown') dz = step;
+    else if (e.key === 'r' || e.key === 'R') turn = true;
+    else return false;
+    e.preventDefault();
+    var r = LoadPlan.dropAt(currentVehicle(), state.placed, state.picked, b.x + dx, b.z + dz, { turn: turn, snap: false });
+    if (!r.ok) {
+      manualFlash(r.reason);
+      return true;
+    }
+    commitBox(state.picked, r.box);
+    return true;
+  }
+
   function wireCanvas() {
     var dragging = false;
     var lastX = 0;
     var lastY = 0;
+    var DRAG_START = 4; /* px before a press on a box becomes a drag */
+
+    function scene() {
+      var gl = window.SyncrofinScene;
+      return state.control === 'manual' && gl && gl.active && gl.pick ? gl : null;
+    }
 
     els.canvas.addEventListener('pointerdown', function (e) {
-      dragging = true;
+      var gl = scene();
+      var box = gl ? gl.pick(e.clientX, e.clientY) : null;
+      var index = box ? state.placed.indexOf(box) : -1;
+      if (index >= 0) {
+        /* a box under the pointer: move it; where on the box it was taken */
+        var at = gl.floorPoint(e.clientX, e.clientY, box.y);
+        state.drag = {
+          index: index,
+          x0: e.clientX,
+          y0: e.clientY,
+          moving: false,
+          grab: at ? { x: at.x - box.x, z: at.z - box.z } : { x: box.l / 2, z: box.w / 2 },
+          at: null,
+          ok: false
+        };
+      } else {
+        dragging = true;
+      }
       lastX = e.clientX;
       lastY = e.clientY;
       if (els.canvas.setPointerCapture) els.canvas.setPointerCapture(e.pointerId);
     });
 
     els.canvas.addEventListener('pointermove', function (e) {
-      if (!dragging) return;
+      var gl = scene();
+      if (state.drag && gl) {
+        var d = state.drag;
+        if (!d.moving && Math.hypot(e.clientX - d.x0, e.clientY - d.y0) < DRAG_START) return;
+        d.moving = true;
+        els.canvas.style.cursor = 'grabbing';
+        var src = state.placed[d.index];
+        var p = gl.floorPoint(e.clientX, e.clientY, src.y);
+        if (!p) return;
+        var r = LoadPlan.dropAt(currentVehicle(), state.placed, d.index, p.x - d.grab.x, p.z - d.grab.z);
+        d.at = r.box;
+        d.ok = r.ok;
+        d.reason = r.reason;
+        draw();
+        return;
+      }
+      if (!dragging) {
+        /* hovering in manual mode: a hand over the boxes */
+        if (gl) els.canvas.style.cursor = gl.pick(e.clientX, e.clientY) ? 'grab' : '';
+        return;
+      }
       var dx = e.clientX - lastX;
       var dy = e.clientY - lastY;
       lastX = e.clientX;
@@ -1856,6 +2216,23 @@
 
     function stop(e) {
       dragging = false;
+      var d = state.drag;
+      if (d) {
+        state.drag = null;
+        els.canvas.style.cursor = '';
+        if (!d.moving) {
+          /* a click on a box: it is the one the keyboard moves */
+          state.picked = d.index;
+          state.selected = state.placed[d.index] ? state.placed[d.index].id : null;
+          renderItems();
+          draw();
+        } else if (d.at && d.ok && e.type === 'pointerup') {
+          commitBox(d.index, d.at);
+        } else {
+          if (d.reason) manualFlash(d.reason);
+          draw();
+        }
+      }
       if (els.canvas.releasePointerCapture && e.pointerId !== undefined) {
         try {
           els.canvas.releasePointerCapture(e.pointerId);
@@ -1885,7 +2262,10 @@
     var resizeTimer = null;
     window.addEventListener('resize', function () {
       window.clearTimeout(resizeTimer);
-      resizeTimer = window.setTimeout(draw, 80);
+      resizeTimer = window.setTimeout(function () {
+        draw();
+        drawAxlePicture();
+      }, 80);
     });
 
     if (window.ResizeObserver) {
@@ -1951,6 +2331,20 @@
         runPlan();
       });
     }
+    if (els.mode) {
+      els.mode.addEventListener('change', function (e) {
+        var input = e.target;
+        if (!input || input.name !== 'plan-mode') return;
+        state.mode = LoadPlan.cleanMode(input.value);
+        state.blocks = null;
+        showMode();
+        save();
+        runPlan();
+      });
+    }
+    if (els.color) {
+      els.color.addEventListener('change', paintColorSelect);
+    }
     if (els.report) {
       els.report.addEventListener('click', function () {
         if (typeof window.print === 'function') window.print();
@@ -1997,13 +2391,20 @@
     });
 
     document.addEventListener('keydown', function (e) {
+      if (manualKey(e)) return;
       if (e.key !== 'Escape') return;
       setMenu(false);
-      if (state.selected !== null) {
+      if (state.selected !== null || state.picked !== null) {
         state.selected = null;
+        state.picked = null;
         renderItems();
         draw();
       }
+    });
+    Array.prototype.forEach.call(document.querySelectorAll('[data-control]'), function (b) {
+      b.addEventListener('click', function () {
+        setControl(b.dataset.control);
+      });
     });
   }
 
@@ -2026,6 +2427,8 @@
     els.fragile = $('#f-fragile');
     els.maxTop = $('#f-maxtop');
     els.rules = $('#plan-rules');
+    els.mode = $('#plan-mode');
+    els.modeHelp = $('#mode-help');
     els.axleProblems = $('#axle-problems');
     els.axleStops = $('#axle-stops');
     els.plan = $('#plan');
@@ -2053,6 +2456,47 @@
     });
   }
 
+  /* -------------------------------------------------- mode and colours --- */
+  var MODE_HELP = {
+    normal: 'Ignora o destino: todos os volumes se misturam para aproveitar ao máximo o espaço e o peso, ' +
+      'respeitando os eixos e as regras do plano.',
+    cliente: 'A carga de cada cliente fica junta, num bloco só, sem volumes de outro cliente na frente dela ' +
+      'nem em cima. A otimização escolhe a ordem dos blocos que melhor aproveita o espaço, o peso e os eixos.',
+    itinerario: 'Segue a ordem de entrega da lista (setas ↑ ↓): a última entrega vai na frente do baú e a primeira ' +
+      'junto às portas, sem nada bloqueando uma entrega anterior. Os eixos são verificados na saída e após cada entrega.'
+  };
+
+  function showMode() {
+    if (!els.mode) return;
+    Array.prototype.forEach.call(els.mode.querySelectorAll('input[name="plan-mode"]'), function (r) {
+      r.checked = r.value === state.mode;
+    });
+    if (els.modeHelp) els.modeHelp.textContent = MODE_HELP[state.mode] || '';
+  }
+
+  /* the colour list comes from COLORS; the select shows a swatch of the
+     chosen one */
+  function fillColors() {
+    var sel = els.color;
+    if (!sel) return;
+    var current = PALETTE[sel.value] ? sel.value : 'blue';
+    sel.innerHTML = '';
+    COLORS.forEach(function (c) {
+      var o = document.createElement('option');
+      o.value = c[0];
+      o.textContent = c[2];
+      sel.appendChild(o);
+    });
+    sel.value = current;
+    paintColorSelect();
+  }
+
+  function paintColorSelect() {
+    var sel = els.color;
+    if (!sel || !sel.style) return;
+    sel.style.borderLeft = '10px solid ' + (PALETTE[sel.value] || PALETTE.blue);
+  }
+
   function init() {
     cacheEls();
     if (!els.canvas || !els.items) return;
@@ -2065,6 +2509,9 @@
         input.value = String(rules[input.dataset.rule]);
       });
     }
+    fillColors();
+    showMode();
+    showControl();
 
     wireUi();
     wireCanvas();

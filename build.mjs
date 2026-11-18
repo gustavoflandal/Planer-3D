@@ -31,6 +31,9 @@ write('assets/app.js', js);
 write('assets/spaces.js', spacesJs);
 write('assets/loadplan.js', read('loadplan.js'));
 write('assets/spaces-ui.js', spacesUiJs);
+/* the loading-order PDF: a small PDF writer and the document built with it */
+write('assets/pdfwriter.js', read('pdfwriter.js'));
+write('assets/loaddoc.js', read('loaddoc.js'));
 /* WebGL view and the Three.js build it imports (MIT, licence kept beside it) */
 write('assets/scene3d.js', read('scene3d.js'));
 write('assets/vendor/three.module.min.js', read('vendor/three.module.min.js'));
@@ -219,7 +222,7 @@ for (const route of legacyRoutes) {
 
 /* --- small self-check: the page must point at files that were written ------ */
 const problems = [];
-for (const asset of ['assets/styles.css', 'assets/spaces.js', 'assets/loadplan.js', 'assets/app.js', 'assets/spaces-ui.js', 'favicon.svg', 'favicon.ico']) {
+for (const asset of ['assets/styles.css', 'assets/spaces.js', 'assets/loadplan.js', 'assets/app.js', 'assets/spaces-ui.js', 'assets/pdfwriter.js', 'assets/loaddoc.js', 'favicon.svg', 'favicon.ico']) {
   if (!html.includes(asset)) problems.push(`index.html does not link ${asset}`);
 }
 /* loadplan.js and app.js read the catalogue from spaces.js, app.js uses

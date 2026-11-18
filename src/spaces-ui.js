@@ -134,6 +134,12 @@
         : '<rect x="2" y="3" width="60" height="15" rx="1"/>';
       return body + '<rect x="9" y="18" width="2" height="5"/>' + wheelRow(rear, 58 - ((rear - 1) * WHEEL_GAP) / 2);
     }
+    if (t.van) {
+      /* one-piece body: short bonnet, raked windscreen, roof to the rear doors */
+      return '<path d="M2 20.5v-7l3-1.5 7-6.5h47.5a2.5 2.5 0 0 1 2.5 2.5v12.5z"/>' +
+        '<path d="M9.5 11.5l4.5-4.5h5v4.5z" fill="#fff" fill-opacity=".45"/>' +
+        wheelRow(front, 12) + wheelRow(rear, 50);
+    }
     if (t.kind === 'lorry') {
       return '<path d="M2 20V10l4-5h9v15z"/><rect x="17" y="2" width="45" height="18" rx="1"/>' +
         wheelRow(front, front > 1 ? 11 : 9) + wheelRow(rear, 54 - ((rear - 1) * WHEEL_GAP) / 2);
@@ -263,7 +269,7 @@
     clear(el.filter);
     S.GROUPS.forEach(function (g) {
       var on = ui.groups.indexOf(g.id) >= 0;
-      var shape = g.id === 'container' ? 'container' : g.id === 'lorry' ? 'lorry' : 'semi';
+      var shape = g.id === 'container' ? 'container' : g.id === 'van' ? 'van2' : g.id === 'lorry' ? 'lorry' : 'semi';
       el.filter.appendChild(
         h('button', {
           type: 'button',
@@ -566,8 +572,8 @@
               ? h('button', {
                 type: 'button',
                 class: 'icon-btn small danger',
-                'aria-label': 'Apagar ' + s.name,
-                title: 'Apagar',
+                'aria-label': 'Excluir ' + s.name,
+                title: 'Excluir',
                 data: { del: s.id },
                 text: '✕'
               })
@@ -617,7 +623,7 @@
     } else if (d.del !== undefined) {
       var target = S.get(d.del);
       if (!target) return;
-      var ok = typeof window.confirm === 'function' ? window.confirm('Apagar o espaço de carga "' + target.name + '"?') : true;
+      var ok = typeof window.confirm === 'function' ? window.confirm('Excluir o espaço de carga "' + target.name + '"?') : true;
       if (!ok) return;
       S.remove(target.id);
       if (ui.form && ui.form.editing === target.id) closeForm();
@@ -798,7 +804,7 @@
       ? ['Medir a partir do prato (pino-rei), que é o 0.',
         'À frente do prato a distância é negativa, atrás é positiva. Exemplo: eixo dianteiro 3 600 mm à frente do prato → -3600; eixo motriz 550 mm atrás → 550.']
       : t.kind === 'box'
-        ? ['Um contentor não tem eixos próprios: as cargas por eixo calculam-se num caminhão ou semirreboque.']
+        ? ['Um contêiner não tem eixos próprios: as cargas por eixo são calculadas em um caminhão ou semirreboque.']
         : t.kind === 'semi'
           ? ['Medir a partir da parede da frente do espaço de carga, que é o 0. Todas as distâncias são positivas.',
             'Exemplo: pino-rei 1 675 mm atrás da parede da frente → 1675; primeiro eixo a 7 985 mm → 7985.']
@@ -831,9 +837,9 @@
       ]),
       h('ul', { class: 'sf-errors', id: 'sf-errors', role: 'alert' }),
       h('div', { class: 'sf-actions' }, [
-        h('button', { type: 'submit', class: 'btn primary', text: 'Guardar' }),
+        h('button', { type: 'submit', class: 'btn primary', text: 'Salvar' }),
         h('button', { type: 'button', class: 'btn line', data: { cancel: '1' }, text: 'Cancelar' }),
-        f.editing && f.edited ? h('button', { type: 'button', class: 'btn line', data: { reset: '1' }, text: 'Repor valores padrão' }) : null
+        f.editing && f.edited ? h('button', { type: 'button', class: 'btn line', data: { reset: '1' }, text: 'Restaurar valores padrão' }) : null
       ])
     ]);
 
@@ -893,7 +899,7 @@
     } else if (btn.dataset.reset) {
       var id = ui.form.editing;
       S.reset(id);
-      ui.notice = 'Os valores padrão de "' + (S.get(id) || {}).name + '" foram repostos.';
+      ui.notice = 'Os valores padrão de "' + (S.get(id) || {}).name + '" foram restaurados.';
       closeForm();
       app.refresh();
       renderTable();
@@ -914,8 +920,8 @@
       if (bad && bad.focus) bad.focus();
       return;
     }
-    ui.notice = (ui.form.editing ? 'Alterações guardadas em "' : 'Espaço de carga criado: "') + result.space.name +
-      '". Escolha-o na lista de espaços do plano de carga.';
+    ui.notice = (ui.form.editing ? 'Alterações salvas em "' : 'Espaço de carga criado: "') + result.space.name +
+      '". Selecione-o na lista de espaços do plano de carga.';
     closeForm();
     app.refresh();
     renderTable();

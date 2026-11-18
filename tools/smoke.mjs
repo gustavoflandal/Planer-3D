@@ -11,7 +11,7 @@ import zlib from 'node:zlib';
 const here = path.dirname(fileURLToPath(import.meta.url));
 const srcFile = (name) => fs.readFileSync(path.join(here, '..', 'src', name), 'utf8');
 /* the page loads these three, in this order */
-const SCRIPTS = ['spaces.js', 'loadplan.js', 'app.js', 'spaces-ui.js'];
+const SCRIPTS = ['spaces.js', 'loadplan.js', 'app.js', 'spaces-ui.js', 'pdfwriter.js', 'loaddoc.js'];
 
 const log = { fills: 0, strokes: 0, moves: 0 };
 
@@ -173,7 +173,7 @@ const checks = [];
 const canvas = elements['#view'];
 checks.push(['canvas sized', canvas.width > 0 && canvas.height > 0]);
 checks.push(['3D drawing happened', log.fills > 3 && log.strokes > 0]);
-checks.push(['catalogue loaded', Spaces.all().length === 20 && Spaces.cargoSpaces().length === 16 && Spaces.tractors().length === 4]);
+checks.push(['catalogue loaded', Spaces.all().length === 24 && Spaces.cargoSpaces().length === 20 && Spaces.tractors().length === 4]);
 checks.push(['default is the semitrailer with a tractor', String(elements['#vehicle-dims'].textContent).startsWith('Semirreboque 13,6 m + Cavalo padrão')]);
 checks.push(['cargo rows rendered', elements['#items'].children.length > 0]);
 checks.push(['status written', String(elements['#status'].textContent).length > 5]);
@@ -367,7 +367,7 @@ function spaceChecks() {
   const fakeStore = { getItem: (k) => (mem.has(k) ? mem.get(k) : null), setItem: (k, v) => mem.set(k, String(v)) };
   Spaces.useStorage(fakeStore);
 
-  out.push(['18 space types', Spaces.TYPES.length === 18]);
+  out.push(['19 space types', Spaces.TYPES.length === 19]);
   out.push(['4-axle types: semitrailer, bitruck, tractor', ['semi4', 'lorry4', 'truck4'].every((id) => Spaces.typeOf(id))]);
   out.push(['roles: semitrailer with 4 axles runs A to E', Spaces.roles('semi4').map((r) => r.letter).join('') === 'ABCDE']);
   out.push(['roles: bitruck steers on A and B', Spaces.roles('lorry4').map((r) => r.group).join() === 'front,front,rear,rear' &&
@@ -395,12 +395,17 @@ function spaceChecks() {
 
   const saved = Spaces.save(good);
   out.push(['custom space saved', saved.ok && saved.space.origin === 'custom' && /^\d{4}-\d{2}-\d{2}$/.test(saved.space.created) &&
-    Spaces.all().length === 21]);
+    Spaces.all().length === 25]);
   const id = saved.space.id;
   out.push(['custom space persisted', JSON.parse(mem.get('syncrofin.spaces.v1')).custom.length === 1]);
 
   out.push(['type filter: containers', Spaces.filter(Spaces.cargoSpaces(), { groups: ['container'] }).length === 3]);
-  out.push(['type filter: lorries + trailers', Spaces.filter(Spaces.cargoSpaces(), { groups: ['lorry', 'trailer'] }).length === 14]);
+  out.push(['type filter: lorries + trailers', Spaces.filter(Spaces.cargoSpaces(), { groups: ['lorry', 'trailer'] }).length === 13]);
+  out.push(['type filter: vans', Spaces.filter(Spaces.cargoSpaces(), { groups: ['van'] }).length === 5]);
+  out.push(['minifurgão is a valid 2-axle van', (function () {
+    const m = Spaces.get('minivan');
+    return !!m && m.type === 'van2' && Spaces.validate(Spaces.clean(m)).length === 0 && Spaces.roles('van2').map((r) => r.role).join() === 'front,rear';
+  })()]);
   Spaces.toggleFavorite(id);
   out.push(['favourites filter', Spaces.filter(Spaces.cargoSpaces(), { favoritesOnly: true }).map((s) => s.id).sort().join() === [id, 'semi'].sort().join()]);
 
@@ -533,6 +538,91 @@ function planChecks() {
   out.push(['the first delivery sits by the doors', Math.max(...drops.placed.filter((b) => b.stop === 0).map((b) => b.x + b.l)) >
     Math.max(...drops.placed.filter((b) => b.stop === 2).map((b) => b.x + b.l))]);
 
+  /* planning modes */
+  const modeItems = [
+    box({ id: 1, l: 1200, w: 800, h: 1000, weight: 300, qty: 9, dest: 'A' }),
+    box({ id: 2, l: 600, w: 400, h: 600, weight: 40, qty: 30, dest: 'B' }),
+    box({ id: 3, l: 1200, w: 1000, h: 900, weight: 250, qty: 8, dest: 'C' })
+  ];
+  const blockedBy = (plan, key) => plan.placed.some((first) => plan.placed.some((other) => other[key] !== first[key] && (
+    (overlapsYZ(first, other) && other.x >= first.x + first.l - EPS && other.stop > first.stop) ||
+    (overlapsXZ(first, other) && other.y >= first.y + first.h - EPS))));
+  out.push(['default mode is the itinerary', P.cleanMode(undefined) === 'itinerario' && drops.mode === 'itinerario' &&
+    drops.check.states.length > 1]);
+  const normal = P.planSync({ vehicle: semi, tractor: t42, stops: ['A', 'B', 'C'], mode: 'normal', items: modeItems }, 10);
+  out.push(['normal mode: one block, checked only as it leaves', normal.placed.length === 47 &&
+    normal.placed.every((b) => b.stop === 0) && normal.check.states.length === 1 && normal.blocks === null]);
+  out.push(['normal mode: clients may share a stack', normal.placed.some((b) => normal.placed.some((u) => u.client !== b.client &&
+    overlapsXZ(b, u) && Math.abs(b.y - (u.y + u.h)) < EPS))]);
+  const byClient = P.planSync({ vehicle: semi, tractor: t42, stops: ['A', 'B', 'C'], mode: 'cliente', items: modeItems }, 30);
+  const clientBlocks = byClient.blocks || [];
+  out.push(['client mode: every client in one block, none blocked or stacked on', byClient.placed.length === 47 &&
+    !blockedBy(byClient, 'client') && clientBlocks.length === 3 && clientBlocks.slice().sort().join() === 'A,B,C']);
+  out.push(['client mode: the blocks follow the order reported, front to doors', clientBlocks.every((name, i) => {
+    if (i === 0) return true;
+    const c = ['A', 'B', 'C'].indexOf(name);
+    const prev = ['A', 'B', 'C'].indexOf(clientBlocks[i - 1]);
+    const front = (k) => Math.min(...byClient.placed.filter((b) => b.client === k).map((b) => b.x));
+    return front(c) >= front(prev) - EPS;
+  }) && byClient.check.states.length === 1]);
+
+  /* manual mode: moving boxes by hand */
+  const handItems = [
+    box({ id: 1, name: 'Base', l: 1200, w: 800, h: 1000, weight: 300, qty: 2, dest: 'A' }),
+    box({ id: 2, name: 'Topo', l: 1200, w: 800, h: 500, weight: 50, qty: 1, dest: 'A' })
+  ];
+  const handInput = { vehicle: semi, tractor: t42, stops: ['A'], mode: 'normal', items: handItems };
+  const handPlan = P.planSync(handInput, 0);
+  const hp = handPlan.placed;
+  const iTop = hp.findIndex((b) => b.id === 2);
+  const iBase = hp.findIndex((b) => b.id === 1 && hp.some((u) => u.id === 2 && Math.abs(u.y - (b.y + b.h)) < 1 &&
+    u.x < b.x + b.l && b.x < u.x + u.l && u.z < b.z + b.w && b.z < u.z + u.w));
+  /* drop the light box in the middle of the floor: it lands on the floor */
+  const toFloor = P.dropAt(semi, hp, iTop, 6000, 900, { snap: false });
+  out.push(['drop on empty floor rests on the floor', toFloor.ok && toFloor.box.y === 0 && toFloor.box.x === 6000 && toFloor.box.z === 900]);
+  /* drop it over a base box: it climbs on top */
+  const baseBox = hp.find((b) => b.id === 1);
+  const onTop = P.dropAt(semi, hp, iTop, baseBox.x + 10, baseBox.z, { snap: false });
+  out.push(['drop over a box rests on top of it', onTop.ok && Math.abs(onTop.box.y - (baseBox.y + baseBox.h)) < 1]);
+  /* near a wall the box snaps against it; never outside the space */
+  const topBox = hp[iTop];
+  const snapped = P.dropAt(semi, hp, iTop, semi.l - topBox.l - 40, -500);
+  out.push(['a box let go near a wall snaps to it and stays inside', snapped.box.x === semi.l - topBox.l && snapped.box.z === 0]);
+  const turned = P.dropAt(semi, hp, iTop, 6000, 0, { turn: true, snap: false }).box;
+  out.push(['turning swaps length and width', turned.l === topBox.w && turned.w === topBox.l]);
+  /* too tall for the stack it would sit on */
+  const lowRoof = Object.assign({}, semi, { h: 1300 });
+  const stackHigh = P.dropAt(lowRoof, [Object.assign({}, hp[0], { x: 0, y: 0, z: 0 }), Object.assign({}, hp[iTop], { x: 5000, y: 0, z: 0 })], 1, 0, 0, { snap: false });
+  out.push(['a box that would pass the roof is refused', !stackHigh.ok && /teto/.test(stackHigh.reason)]);
+  /* moving the base from under the light box: the light box comes down */
+  if (iBase >= 0) {
+    const away = P.dropAt(semi, hp, iBase, 9000, 0, { snap: false });
+    const next = hp.slice();
+    next[iBase] = away.box;
+    const after = P.evaluate(handInput, next, []);
+    const fallen = after.placed[iTop];
+    out.push(['what rested on a moved box comes down', fallen.y < hp[iTop].y && after.placed.length === 3]);
+  } else {
+    out.push(['what rested on a moved box comes down', false]);
+  }
+  /* a box hanging half off its support is reported, not refused */
+  const halfway = hp.slice();
+  halfway[iTop] = Object.assign({}, hp[iTop], { x: baseBox.x + baseBox.l * 0.75, y: baseBox.y + baseBox.h, z: baseBox.z });
+  const overhang = P.evaluate(handInput, halfway, []);
+  out.push(['a hand-made overhang is reported as a support problem', overhang.check.problems.some((p) => p.kind === 'support')]);
+  /* the list grows in manual mode: the hand-placed boxes stay, the new ones go around */
+  const moved = P.dropAt(semi, hp, iTop, 9000, 0, { snap: false });
+  const kept = hp.slice();
+  kept[iTop] = moved.box;
+  const grown = handItems.map((it) => Object.assign({}, it)).concat([box({ id: 3, name: 'Nova', l: 600, w: 400, h: 400, weight: 20, qty: 4, dest: 'A' })]);
+  const filled = P.fill(Object.assign({}, handInput, { items: grown }), P.evaluate(handInput, kept, []).placed);
+  const stillThere = filled.placed.find((b) => b.id === 2);
+  out.push(['manual fill keeps hand-placed boxes and adds the new ones', filled.placed.length === 7 && stillThere &&
+    stillThere.x === 9000 && stillThere.y === 0 && !filled.placed.some((a, i) => filled.placed.some((b, j) => i < j &&
+      a.x < b.x + b.l - EPS && b.x < a.x + a.l - EPS && a.y < b.y + b.h - EPS && b.y < a.y + a.h - EPS && a.z < b.z + b.w - EPS && b.z < a.z + a.w - EPS))]);
+  const shrunk = P.fill(Object.assign({}, handInput, { items: [handItems[1]] }), kept);
+  out.push(['manual fill drops boxes of items taken off the list', shrunk.placed.length === 1 && shrunk.placed[0].id === 2 && shrunk.placed[0].x === 9000]);
+
   /* axle limits while placing: 24 t that would overload the tractor if loaded from the front */
   const heavy = P.planSync({ vehicle: semi, tractor: t42, items: [box({ l: 1200, w: 1200, h: 900, weight: 2000, qty: 12 })] }, 0);
   out.push(['heavy load placed within every axle limit', heavy.placed.length === 12 && !heavy.check.problems.some((p) => p.hard)]);
@@ -622,6 +712,39 @@ try {
 
 /* A plan saved before cargo spaces existed kept the vehicle as an index into
    the old fixed list (4 = 20 ft container): it must open on the same space. */
+/* loading order and the PDF document, on the plan the page is showing */
+{
+  const P = window.SyncrofinLoadPlan;
+  const data = window.SyncrofinApp.docData();
+  const placed = data.placed;
+  const ls = P.loadingSteps(placed);
+  const pos = [];
+  ls.order.forEach((idx, i) => { pos[idx] = i; });
+  const restsOn = (hi, lo) => Math.abs(lo.y + lo.h - hi.y) <= 1 && hi.x < lo.x + lo.l && lo.x < hi.x + hi.l && hi.z < lo.z + lo.w && lo.z < hi.z + hi.w;
+  checks.push(['loading order covers every box once', ls.order.length === placed.length && new Set(ls.order).size === placed.length &&
+    ls.steps.reduce((s, st) => s + st.boxes.length, 0) === placed.length]);
+  checks.push(['loading order: a box only after the boxes it rests on', placed.every((b, i) =>
+    placed.every((u, j) => !(i !== j && restsOn(b, u)) || pos[j] < pos[i]))]);
+  checks.push(['loading order starts at the far end', placed[ls.order[0]].x === Math.min(...placed.map((b) => b.x)) &&
+    ls.steps[0].from <= ls.steps[ls.steps.length - 1].from]);
+
+  const doc = window.SyncrofinLoadDoc.build(data);
+  const bytes = doc.bytes;
+  const text = Buffer.from(bytes).toString('latin1');
+  const startxref = Number(/startxref\n(\d+)\n%%EOF\n$/.exec(text)?.[1]);
+  const xref = text.slice(startxref);
+  const offsets = [...xref.matchAll(/^(\d{10}) 00000 n $/gm)].map((m) => Number(m[1]));
+  checks.push(['PDF: header, cross-reference table and end of file', text.startsWith('%PDF-1.4') && xref.startsWith('xref') &&
+    offsets.length > 5 && offsets.every((o, i) => text.startsWith((i + 1) + ' 0 obj', o))]);
+  checks.push(['PDF: a cover and the steps, every page with its footer', doc.pages >= 2 && doc.steps === ls.steps.length &&
+    (text.match(/\/Type \/Page /g) || []).length === doc.pages && (text.match(/\(P\\341gina /g) || []).length === doc.pages]);
+  checks.push(['PDF: accents written in WinAnsi', text.includes('(Etapa 1 de ') && /\(Planejamento|PLANEJAMENTO/.test(text) &&
+    text.includes('\\341') && /\.pdf$/.test(doc.name)]);
+  const Pdf = window.SyncrofinPdf;
+  checks.push(['PDF text width and wrapping', Math.abs(Pdf.textWidth('Ação', 10, false) - (667 + 500 + 556 + 556) / 100) < 0.01 &&
+    Pdf.wrap('carregue sempre do fundo para as portas', 10, false, 80).every((l) => Pdf.textWidth(l, 10, false) <= 80)]);
+}
+
 {
   store.clear();
   store.set('carga3d.v1', JSON.stringify({ vehicle: 4, items: [{ id: 1, name: 'Caixa', l: 1000, w: 800, h: 600, weight: 50, qty: 4, color: 'blue', dest: '' }] }));
@@ -629,7 +752,7 @@ try {
   sb2.window.document = document;
   vm.createContext(sb2);
   for (const name of SCRIPTS) vm.runInContext(srcFile(name), sb2, { filename: name });
-  checks.push(['old saved plan opens on the same vehicle', String(elements['#vehicle-dims'].textContent).startsWith('Contentor 20 pés ·')]);
+  checks.push(['old saved plan opens on the same vehicle', String(elements['#vehicle-dims'].textContent).startsWith('Contêiner 20 pés ·')]);
   checks.push(['container shows no axle loads', elements['#axle-list'].children.length === 1 &&
     elements['#axle-list'].children[0].className === 'axle-none']);
 }
