@@ -29,6 +29,7 @@ write('index.html', html);
 write('assets/styles.css', css);
 write('assets/app.js', js);
 write('assets/spaces.js', spacesJs);
+write('assets/loadplan.js', read('loadplan.js'));
 write('assets/spaces-ui.js', spacesUiJs);
 /* WebGL view and the Three.js build it imports (MIT, licence kept beside it) */
 write('assets/scene3d.js', read('scene3d.js'));
@@ -218,13 +219,13 @@ for (const route of legacyRoutes) {
 
 /* --- small self-check: the page must point at files that were written ------ */
 const problems = [];
-for (const asset of ['assets/styles.css', 'assets/spaces.js', 'assets/app.js', 'assets/spaces-ui.js', 'favicon.svg', 'favicon.ico']) {
+for (const asset of ['assets/styles.css', 'assets/spaces.js', 'assets/loadplan.js', 'assets/app.js', 'assets/spaces-ui.js', 'favicon.svg', 'favicon.ico']) {
   if (!html.includes(asset)) problems.push(`index.html does not link ${asset}`);
 }
-/* app.js reads the catalogue from spaces.js and spaces-ui.js reads the planner,
-   so the order of the three scripts matters. */
-const order = ['assets/spaces.js', 'assets/app.js', 'assets/spaces-ui.js'].map((a) => html.indexOf(a));
-if (!(order[0] < order[1] && order[1] < order[2])) problems.push('scripts must load as spaces.js, app.js, spaces-ui.js');
+/* loadplan.js and app.js read the catalogue from spaces.js, app.js uses
+   loadplan.js, and spaces-ui.js reads the planner, so the order matters. */
+const order = ['assets/spaces.js', 'assets/loadplan.js', 'assets/app.js', 'assets/spaces-ui.js'].map((a) => html.indexOf(a));
+if (!order.every((v, i) => v >= 0 && (i === 0 || order[i - 1] < v))) problems.push('scripts must load as spaces.js, loadplan.js, app.js, spaces-ui.js');
 if (!html.includes('<script type="module" src="assets/scene3d.js">')) problems.push('index.html does not load the WebGL view as a module');
 if (!read('scene3d.js').includes("from './vendor/three.module.min.js'")) problems.push('scene3d.js must import the bundled Three.js');
 for (const rel of written.map((w) => w.split(' ')[0])) {

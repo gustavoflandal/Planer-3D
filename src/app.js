@@ -1,7 +1,9 @@
 /* Syncrofin 3D Planner — a load planner for trucks and containers.
-   Everything runs in the browser: the cargo list is packed into the chosen
-   vehicle by a simple extreme-point heuristic and drawn on a canvas with a
-   hand-written 3D projection. No libraries. */
+   Everything runs in the browser: the cargo list is arranged in the chosen
+   vehicle by loadplan.js (maximal spaces, every rule and axle limit enforced
+   while placing, checked after each delivery, a time-boxed search on top) and
+   drawn in WebGL (scene3d.js) or, without it, on a canvas with a hand-written
+   3D projection. */
 
 (function () {
   'use strict';
@@ -23,9 +25,28 @@
   var DEMO = [
     { name: 'Palete EUR', l: 1200, w: 800, h: 1450, weight: 420, qty: 12, color: 'blue', dest: 'FruitPlanet Corp' },
     { name: 'Caixa grande', l: 1200, w: 1000, h: 900, weight: 180, qty: 6, color: 'yellow', dest: 'FruitPlanet Corp' },
-    { name: 'Caixa pequena', l: 600, w: 400, h: 400, weight: 35, qty: 20, color: 'green', dest: 'Grupo 1' },
-    { name: 'Barril', l: 600, w: 600, h: 900, weight: 150, qty: 4, color: 'orange', dest: 'Grupo 1' }
+    { name: 'Caixa pequena', l: 600, w: 400, h: 400, weight: 35, qty: 20, color: 'green', dest: 'Grupo 1', fragile: true },
+    { name: 'Barril', l: 600, w: 600, h: 900, weight: 150, qty: 4, color: 'orange', dest: 'Grupo 1', maxTop: 300 }
   ];
+
+  function demoItems() {
+    return DEMO.map(function (it) {
+      return {
+        id: nextId++,
+        name: it.name,
+        l: it.l,
+        w: it.w,
+        h: it.h,
+        weight: it.weight,
+        qty: it.qty,
+        color: it.color,
+        dest: it.dest || '',
+        orient: it.orient === 'any' ? 'any' : 'upright',
+        fragile: !!it.fragile,
+        maxTop: typeof it.maxTop === 'number' ? it.maxTop : null
+      };
+    });
+  }
 
   var STORE_KEY = 'carga3d.v1';
 
@@ -37,6 +58,11 @@
     placed: [],
     unplaced: [],
     totals: { count: 0, volume: 0, weight: 0, area: 0 },
+    check: null, /* the plan checked as it leaves and after each delivery */
+    shift: 0, /* mm the load was slid back to relieve an axle */
+    progress: null, /* the search for a better plan: { tries, elapsed, done } */
+    stops: [], /* destinations in delivery order */
+    rules: null, /* see loadplan.js; null = the defaults */
     selected: null,
     view: { az: -2.3, elev: 0.4, zoom: 1 }
   };
@@ -109,7 +135,13 @@
     try {
       window.localStorage.setItem(
         STORE_KEY,
-        JSON.stringify({ space: state.spaceId, tractor: state.tractorId, items: state.items })
+        JSON.stringify({
+          space: state.spaceId,
+          tractor: state.tractorId,
+          items: state.items,
+          stops: state.stops,
+          rules: state.rules
+        })
       );
     } catch (e) {
       /* private mode: the planner still works, it just forgets on reload */
@@ -145,9 +177,18 @@
             weight: clamp(num(it.weight, 100), 0, 30000),
             qty: clamp(Math.round(num(it.qty, 1)), 1, 500),
             color: PALETTE[it.color] ? it.color : 'blue',
-            dest: typeof it.dest === 'string' ? String(it.dest).slice(0, 40) : ''
+            dest: typeof it.dest === 'string' ? String(it.dest).slice(0, 40) : '',
+            orient: it.orient === 'any' ? 'any' : 'upright',
+            fragile: !!it.fragile,
+            maxTop: typeof it.maxTop === 'number' && it.maxTop >= 0 ? it.maxTop : null
           };
         });
+      if (Array.isArray(data.stops)) {
+        state.stops = data.stops.filter(function (d) {
+          return typeof d === 'string';
+        });
+      }
+      if (data.rules && typeof data.rules === 'object') state.rules = LoadPlan.cleanRules(data.rules);
       return true;
     } catch (e) {
       return false;
@@ -155,238 +196,32 @@
   }
 
   /* --------------------------------------------------------------- packing --- */
-  /* Constructive heuristic for the 3D Container Loading Problem.
+  /* The arranging and the checking live in loadplan.js (window.SyncrofinLoadPlan):
+     a constructive heuristic with every rule enforced as each box goes in
+     (axle limits included), a check of the plan as it leaves and after each
+     delivery, and a time-boxed search for a better plan. The planner shows
+     the first plan at once and swaps in better ones as they are found; any
+     edit stops the search and starts a new one. */
+  var LoadPlan = window.SyncrofinLoadPlan;
+  var search = null; /* the running search, if any */
 
-     The vehicle is filled with the Empty Maximal Space (EMS) method: the
-     algorithm keeps a list of empty rectangular spaces and, for each box,
-     places it at the back-bottom-left corner of the space that gives the
-     deepest, lowest, tightest fit, then splits the space that was used into
-     (at most) three new maximal spaces. This is the classic "deepest-bottom-
-     left-fill" constructive heuristic for CLP / 3D-BPP. To make the greedy
-     choice robust, several box orders (biggest volume, longest side, heaviest)
-     are tried and the packing that loads the most cargo volume is kept. */
-
-  var SUPPORT_FRACTION = 0.6; /* a box not on the floor needs this share of its base supported */
-
-  function overlaps(a, b) {
-    return (
-      a.x < b.x + b.l - 0.5 &&
-      b.x < a.x + a.l - 0.5 &&
-      a.z < b.z + b.w - 0.5 &&
-      b.z < a.z + a.w - 0.5 &&
-      a.y < b.y + b.h - 0.5 &&
-      b.y < a.y + a.h - 0.5
-    );
-  }
-
-  function supportArea(box, placed) {
-    if (box.y <= 0.5) return box.l * box.w; /* the floor holds the whole base */
-    var area = 0;
-    for (var i = 0; i < placed.length; i++) {
-      var p = placed[i];
-      if (Math.abs(p.y + p.h - box.y) > 1) continue;
-      var ox = Math.min(box.x + box.l, p.x + p.l) - Math.max(box.x, p.x);
-      var oz = Math.min(box.z + box.w, p.z + p.w) - Math.max(box.z, p.z);
-      if (ox > 0 && oz > 0) area += ox * oz;
-    }
-    return area;
-  }
-
-  function isSupported(box, placed) {
-    return supportArea(box, placed) >= box.l * box.w * SUPPORT_FRACTION - 0.5;
-  }
-
-  function orientations(it) {
-    /* Every way to lay the three dimensions onto (length, width, height).
-       "upright" keeps the box's own height as the height, which is preferred;
-       tipped orientations are still tried when they pack better. */
-    var d = [it.l, it.w, it.h];
-    var seen = {};
-    var out = [];
-    for (var a = 0; a < 3; a++) {
-      for (var b = 0; b < 3; b++) {
-        if (a === b) continue;
-        var c = 3 - a - b;
-        var L = d[a];
-        var W = d[b];
-        var H = d[c];
-        var key = L + 'x' + W + 'x' + H;
-        if (seen[key]) continue;
-        seen[key] = 1;
-        out.push({ l: L, w: W, h: H, upright: c === 2 });
-      }
-    }
-    return out;
-  }
-
-  function tidySpaces(spaces) {
-    /* Drop spaces swallowed by a bigger one, and slivers too small to use. */
-    var usable = [];
-    for (var i = 0; i < spaces.length; i++) {
-      var a = spaces[i];
-      if (a.l < 5 || a.w < 5 || a.h < 5) continue;
-      var dominated = false;
-      for (var j = 0; j < spaces.length; j++) {
-        if (i === j) continue;
-        var b = spaces[j];
-        if (
-          a.x >= b.x - 0.5 && a.y >= b.y - 0.5 && a.z >= b.z - 0.5 &&
-          a.x + a.l <= b.x + b.l + 0.5 &&
-          a.y + a.h <= b.y + b.h + 0.5 &&
-          a.z + a.w <= b.z + b.w + 0.5 &&
-          (b.l > a.l || b.w > a.w || b.h > a.h)
-        ) {
-          dominated = true;
-          break;
-        }
-      }
-      if (!dominated) usable.push(a);
-    }
-    usable.sort(function (a, b) {
-      return b.l * b.w * b.h - a.l * a.w * a.h;
-    });
-    return usable.slice(0, 64);
-  }
-
-  function packVehicle(vehicle, queue) {
-    var placed = [];
-    var unplaced = [];
-    var weight = 0;
-    var spaces = [{ x: 0, y: 0, z: 0, l: vehicle.l, w: vehicle.w, h: vehicle.h }];
-
-    queue.forEach(function (it) {
-      if (weight + it.weight > vehicle.payload + 0.5) {
-        unplaced.push({ id: it.id, name: it.name, reason: 'peso' });
-        return;
-      }
-
-      var orients = orientations(it);
-      var best = null;
-
-      for (var s = 0; s < spaces.length; s++) {
-        var sp = spaces[s];
-        for (var o = 0; o < orients.length; o++) {
-          var or = orients[o];
-          if (or.l > sp.l + 0.5 || or.w > sp.w + 0.5 || or.h > sp.h + 0.5) continue;
-
-          var box = { x: sp.x, y: sp.y, z: sp.z, l: or.l, w: or.w, h: or.h };
-          if (!isSupported(box, placed)) continue;
-
-          var clash = false;
-          for (var k = 0; k < placed.length; k++) {
-            if (overlaps(box, placed[k])) {
-              clash = true;
-              break;
-            }
-          }
-          if (clash) continue;
-
-          /* Deepest-bottom-left: prefer the far wall, then the floor, then the
-             left side; among equal corners take the tightest fit into the
-             space, and keep the box upright unless tipping clearly helps. */
-          var score =
-            box.x * 1e9 +
-            box.y * 1e6 +
-            box.z * 1e3 +
-            (sp.l * sp.w * sp.h - or.l * or.w * or.h) / 1e9 +
-            (or.upright ? 0 : 0.5);
-
-          if (!best || score < best.score) {
-            best = { box: box, space: sp, index: s, score: score };
-          }
-        }
-      }
-
-      if (!best) {
-        unplaced.push({ id: it.id, name: it.name, reason: 'espaco' });
-        return;
-      }
-
-      best.box.id = it.id;
-      best.box.name = it.name;
-      best.box.color = it.color;
-      best.box.weight = it.weight;
-      placed.push(best.box);
-      weight += it.weight;
-
-      /* Split the space that was used into the three maximal spaces left
-         behind (above, to the side, in front). */
-      var sp = best.space;
-      var box = best.box;
-      var next = [];
-      if (box.h < sp.h - 0.5) {
-        next.push({ x: sp.x, y: box.y + box.h, z: sp.z, l: sp.l, w: sp.w, h: sp.h - box.h });
-      }
-      if (box.w < sp.w - 0.5) {
-        next.push({ x: sp.x, y: sp.y, z: box.z + box.w, l: sp.l, w: sp.w - box.w, h: sp.h });
-      }
-      if (box.l < sp.l - 0.5) {
-        next.push({ x: box.x + box.l, y: sp.y, z: sp.z, l: sp.l - box.l, w: sp.w, h: sp.h });
-      }
-
-      spaces = spaces.slice(0, best.index).concat(spaces.slice(best.index + 1), next);
-      spaces = tidySpaces(spaces);
-    });
-
-    return { placed: placed, unplaced: unplaced, weight: weight };
-  }
-
-  function summarize(placed, unplaced, weight) {
-    var volume = 0;
-    var area = 0;
-    placed.forEach(function (b) {
-      volume += (b.l * b.w * b.h) / 1e9;
-      /* floor used: only what stands on the floor (stacked boxes sit on others,
-         and counting them pushed the gauge past 100%) */
-      if (b.y < 0.5) area += (b.l * b.w) / 1e6;
-    });
+  function planInput() {
+    state.stops = LoadPlan.stopOrder(state.items, state.stops);
     return {
-      placed: placed,
-      unplaced: unplaced,
-      totals: {
-        count: placed.length,
-        volume: volume,
-        weight: weight,
-        area: area,
-        queue: placed.length + unplaced.length
-      }
+      vehicle: currentVehicle(),
+      tractor: currentTractor(),
+      items: state.items,
+      stops: state.stops,
+      rules: state.rules
     };
   }
 
-  function betterThan(a, b) {
-    if (a.totals.volume !== b.totals.volume) return a.totals.volume > b.totals.volume;
-    if (a.totals.count !== b.totals.count) return a.totals.count > b.totals.count;
-    return a.totals.area > b.totals.area;
-  }
-
-  function pack(vehicle, items) {
-    var queue = [];
-    items.forEach(function (it) {
-      for (var i = 0; i < it.qty; i++) {
-        queue.push({ id: it.id, name: it.name, color: it.color, weight: it.weight, l: it.l, w: it.w, h: it.h });
-      }
-    });
-
-    var byVolume = queue.slice().sort(function (a, b) {
-      return b.l * b.w * b.h - a.l * a.w * a.h;
-    });
-    var byLongest = queue.slice().sort(function (a, b) {
-      return Math.max(b.l, b.w, b.h) - Math.max(a.l, a.w, a.h);
-    });
-    var byWeight = queue.slice().sort(function (a, b) {
-      return b.weight - a.weight;
-    });
-
-    /* Three greedy orders, best packing kept; one pass for very large jobs. */
-    var orders = queue.length > 150 ? [byVolume] : [byVolume, byLongest, byWeight];
-    var best = null;
-    orders.forEach(function (ordered) {
-      var r = packVehicle(vehicle, ordered);
-      var result = summarize(r.placed, r.unplaced, r.weight);
-      if (!best || betterThan(result, best)) best = result;
-    });
-
-    return best;
+  function applyPlan(result) {
+    state.placed = result.placed;
+    state.unplaced = result.unplaced;
+    state.totals = result.totals;
+    state.check = result.check;
+    state.shift = result.shift || 0;
   }
 
   /* ------------------------------------------------------------ projection --- */
@@ -705,19 +540,28 @@
     if (!state.items.length) {
       els.status.textContent = 'Lista vazia — adicione volumes para começar.';
     } else if (state.unplaced.length) {
-      var byWeight = state.unplaced.filter(function (u) {
-        return u.reason === 'peso';
-      }).length;
+      var count = { peso: 0, eixo: 0, regras: 0, espaco: 0 };
+      state.unplaced.forEach(function (u) {
+        count[u.reason] = (count[u.reason] || 0) + 1;
+      });
       var parts = [];
       parts.push(t.count + ' de ' + t.queue + ' volumes colocados');
-      if (byWeight) parts.push(byWeight + ' ficaram de fora por excesso de peso');
-      if (state.unplaced.length - byWeight) {
-        parts.push(state.unplaced.length - byWeight + ' não couberam no espaço livre');
-      }
+      if (count.peso) parts.push(count.peso + ' de fora por excesso de peso');
+      if (count.eixo) parts.push(count.eixo + ' de fora para não exceder o limite de um eixo');
+      if (count.regras) parts.push(count.regras + ' de fora pelas regras de empilhamento ou de descarga');
+      if (count.espaco) parts.push(count.espaco + ' não couberam no espaço livre');
       els.status.textContent = parts.join(' · ') + '.';
     } else {
       els.status.textContent =
         'Tudo colocado: ' + t.count + ' volumes, ' + fmt(t.volume, 1) + ' m³ de carga.';
+    }
+    if (state.items.length && state.progress) {
+      els.status.textContent += state.progress.done
+        ? ' Otimizado: ' + state.progress.tries + ' tentativas em ' + fmt(state.progress.elapsed / 1000, 1) + ' s.'
+        : ' Otimizando…';
+    }
+    if (state.shift > 0) {
+      els.status.textContent += ' Carga recuada ' + fmt(state.shift) + ' mm para aliviar um eixo.';
     }
 
     var tractor = currentTractor();
@@ -743,23 +587,40 @@
       missing[u.id] = (missing[u.id] || 0) + 1;
     });
 
-    var groups = [];
-    var order = {};
-    state.items.forEach(function (it) {
-      var key = it.dest || '';
-      if (!(key in order)) {
-        order[key] = groups.length;
-        groups.push({ name: key, items: [] });
-      }
-      groups[order[key]].items.push(it);
+    /* the destinations in delivery order, each with its items */
+    state.stops = LoadPlan.stopOrder(state.items, state.stops);
+    var groups = state.stops.map(function (d) {
+      return { name: d, items: [] };
     });
+    state.items.forEach(function (it) {
+      groups[state.stops.indexOf(it.dest || '')].items.push(it);
+    });
+    var several = groups.length > 1;
 
     els.items.innerHTML = '';
-    groups.forEach(function (group) {
-      if (group.name) {
+    groups.forEach(function (group, gi) {
+      if (group.name || several) {
         var head = document.createElement('li');
         head.className = 'group-head';
-        head.textContent = group.name;
+        var title = document.createElement('span');
+        title.className = 'group-title';
+        title.textContent = (several ? 'Entrega ' + (gi + 1) + ' · ' : '') + (group.name || 'Sem destino');
+        head.appendChild(title);
+        if (several) {
+          /* the delivery order decides the loading: the last delivery goes in first */
+          [['up', '↑', 'Entregar antes'], ['down', '↓', 'Entregar depois']].forEach(function (b) {
+            var btn = document.createElement('button');
+            btn.type = 'button';
+            btn.className = 'stop-move';
+            btn.dataset.stop = String(gi);
+            btn.dataset.move = b[0];
+            btn.textContent = b[1];
+            btn.title = b[2];
+            btn.setAttribute('aria-label', b[2] + ': ' + (group.name || 'Sem destino'));
+            if ((b[0] === 'up' && gi === 0) || (b[0] === 'down' && gi === groups.length - 1)) btn.disabled = true;
+            head.appendChild(btn);
+          });
+        }
         els.items.appendChild(head);
       }
       group.items.forEach(function (it) {
@@ -789,8 +650,13 @@
         }
         var meta = document.createElement('span');
         meta.className = 'item-meta';
+        var rules = [];
+        if (it.orient === 'any') rules.push('pode deitar');
+        if (it.fragile) rules.push('frágil');
+        else if (typeof it.maxTop === 'number') rules.push(it.maxTop === 0 ? 'não empilhar' : 'máx. ' + fmt(it.maxTop) + ' kg em cima');
         meta.textContent =
-          fmt(it.l) + ' × ' + fmt(it.w) + ' × ' + fmt(it.h) + ' mm · ' + it.qty + ' un · ' + fmtWeight(it.weight) + ' kg';
+          fmt(it.l) + ' × ' + fmt(it.w) + ' × ' + fmt(it.h) + ' mm · ' + it.qty + ' un · ' + fmtWeight(it.weight) + ' kg' +
+          (rules.length ? ' · ' + rules.join(' · ') : '');
         text.appendChild(name);
         text.appendChild(meta);
 
@@ -957,7 +823,7 @@
 
     if (!res.rows.length) {
       ac.fillStyle = '#5d5d5d';
-      ac.fillText('Sem eixos próprios: escolha um camião, reboque ou semirreboque para ver as cargas por eixo.', cssW / 2, floorY + 30);
+      ac.fillText('Sem eixos próprios: escolha um caminhão, reboque ou semirreboque para ver as cargas por eixo.', cssW / 2, floorY + 30);
       return;
     }
 
@@ -1024,7 +890,29 @@
         li.appendChild(lim);
         els.axleList.appendChild(li);
       });
+      /* groups of axles, with their own limit when the catalogue has one */
+      (res.groups || []).forEach(function (g) {
+        var li = document.createElement('li');
+        li.className = 'axle-item group' + (g.part === 'tractor' ? ' tractor' : '');
+        var dot = document.createElement('span');
+        dot.className = 'axle-dot ' + g.status;
+        dot.setAttribute('aria-hidden', 'true');
+        var label = document.createElement('span');
+        label.className = 'axle-name';
+        label.textContent = (g.part === 'tractor' ? 'Cavalo · ' : '') + g.label + ' (' + g.letters + ')';
+        var val = document.createElement('b');
+        val.textContent = fmt(g.load) + ' kg';
+        var lim = document.createElement('span');
+        lim.className = 'axle-limit';
+        lim.textContent = g.max ? 'máx. do conjunto ' + fmt(g.max) + ' kg' : 'sem limite de conjunto no cadastro';
+        li.appendChild(dot);
+        li.appendChild(label);
+        li.appendChild(val);
+        li.appendChild(lim);
+        els.axleList.appendChild(li);
+      });
     }
+    renderChecks(vehicle);
 
     if (els.axleCog) {
       var latM = (res.cgz - vehicle.w / 2) / 1000;
@@ -1036,6 +924,9 @@
         text += ' · carga nas rodas ' + Math.round(res.leftShare * 100) + '% esq. / ' +
           Math.round((1 - res.leftShare) * 100) + '% dir.';
       }
+      if (res.gross && res.rows.length) {
+        text += ' · peso bruto ' + fmt(res.gross.load) + ' kg' + (res.gross.max ? ' (máx. ' + fmt(res.gross.max) + ' kg)' : '');
+      }
       if (Spaces.takesTractor(vehicle) && !currentTractor()) {
         text += ' · sem cavalo: só se calcula a carga no pino-rei.';
       }
@@ -1045,12 +936,92 @@
     drawAxle(res);
   }
 
-  function runPlan() {
-    var vehicle = currentVehicle();
-    var result = pack(vehicle, state.items);
-    state.placed = result.placed;
-    state.unplaced = result.unplaced;
-    state.totals = result.totals;
+  /* What the checker found, as the plan leaves and after each delivery, and
+     a table of every axle's use in each of those states. */
+  function renderChecks(vehicle) {
+    var check = state.check;
+    if (els.axleProblems) {
+      els.axleProblems.innerHTML = '';
+      var problems = check ? check.problems : [];
+      if (state.items.length && check && check.states[0].res.rows.length) {
+        if (!problems.length) {
+          var ok = document.createElement('li');
+          ok.className = 'ok';
+          ok.textContent = check.states.length > 1
+            ? 'Todos os eixos dentro dos limites na saída e depois de cada entrega.'
+            : 'Todos os eixos dentro dos limites.';
+          els.axleProblems.appendChild(ok);
+        }
+        problems.forEach(function (p) {
+          var li = document.createElement('li');
+          li.className = p.hard ? 'hard' : 'soft';
+          li.textContent = (check.states.length > 1 ? p.state + ': ' : '') + p.text;
+          els.axleProblems.appendChild(li);
+        });
+      }
+      els.axleProblems.hidden = !els.axleProblems.children.length;
+    }
+
+    if (!els.axleStops) return;
+    els.axleStops.innerHTML = '';
+    var states = check ? check.states : [];
+    els.axleStops.hidden = !(states.length > 1 && states[0].res.rows.length);
+    if (els.axleStops.hidden) return;
+
+    var table = document.createElement('table');
+    table.className = 'stops-table';
+    var cap = document.createElement('caption');
+    cap.textContent = 'Uso de cada eixo na saída e depois de cada entrega';
+    table.appendChild(cap);
+    var cols = states[0].res.rows.filter(function (r) {
+      return !(r.info && !(r.max > 0));
+    });
+    var headRow = document.createElement('tr');
+    var corner = document.createElement('th');
+    corner.textContent = 'Momento';
+    headRow.appendChild(corner);
+    cols.forEach(function (r) {
+      var th = document.createElement('th');
+      th.textContent = (r.part === 'tractor' ? 'Cav. ' : r.info ? 'Pino ' : '') + r.letter;
+      th.title = (r.part === 'tractor' ? 'Cavalo · ' : '') + r.label;
+      headRow.appendChild(th);
+    });
+    var grossTh = document.createElement('th');
+    grossTh.textContent = 'Bruto';
+    headRow.appendChild(grossTh);
+    table.appendChild(headRow);
+
+    states.forEach(function (st) {
+      var tr = document.createElement('tr');
+      var th = document.createElement('th');
+      th.textContent = st.label;
+      tr.appendChild(th);
+      var rowsByKey = {};
+      st.res.rows.forEach(function (r) {
+        rowsByKey[r.part + r.letter] = r;
+      });
+      cols.forEach(function (c) {
+        var r = rowsByKey[c.part + c.letter];
+        var td = document.createElement('td');
+        if (r && r.max > 0) {
+          td.textContent = Math.round((r.load / r.max) * 100) + '%';
+          td.className = 'st-' + r.status;
+          td.title = fmt(r.load) + ' kg de ' + fmt(r.max) + ' kg';
+        } else {
+          td.textContent = '—';
+        }
+        tr.appendChild(td);
+      });
+      var g = document.createElement('td');
+      g.textContent = fmt(st.res.gross.load) + ' kg';
+      if (st.res.gross.max) g.className = 'st-' + st.res.gross.status;
+      tr.appendChild(g);
+      table.appendChild(tr);
+    });
+    els.axleStops.appendChild(table);
+  }
+
+  function showPlan() {
     renderItems();
     renderGauges();
     renderStatus();
@@ -1058,6 +1029,23 @@
     sceneDirty = true;
     draw();
     notifyPlan();
+  }
+
+  function runPlan() {
+    if (search) search.cancel();
+    state.progress = null;
+    search = LoadPlan.start(planInput(), function (best, progress) {
+      state.progress = progress;
+      if (progress.improved) {
+        applyPlan(best);
+        showPlan();
+      } else {
+        renderStatus();
+      }
+    });
+    applyPlan(search.best);
+    state.progress = search.running() ? { tries: 3, elapsed: 0, done: false } : null;
+    showPlan();
   }
 
   /* -------------------------------------------------------------------- ui --- */
@@ -1171,6 +1159,13 @@
       return;
     }
 
+    var maxTopRaw = els.maxTop ? String(els.maxTop.value).trim() : '';
+    var maxTop = maxTopRaw === '' ? null : Math.round(num(maxTopRaw, NaN));
+    if (maxTopRaw !== '' && !(maxTop >= 0 && maxTop <= 100000)) {
+      els.formMsg.textContent = 'O peso máximo em cima tem de ficar entre 0 e 100 000 kg (vazio = sem limite).';
+      return;
+    }
+
     els.formMsg.textContent = '';
     state.items.push({
       id: nextId++,
@@ -1181,7 +1176,10 @@
       weight: weight,
       qty: qty,
       color: PALETTE[els.color.value] ? els.color.value : 'blue',
-      dest: els.dest ? els.dest.value.trim().slice(0, 40) : ''
+      dest: els.dest ? els.dest.value.trim().slice(0, 40) : '',
+      orient: els.orient && els.orient.value === 'any' ? 'any' : 'upright',
+      fragile: !!(els.fragile && els.fragile.checked),
+      maxTop: maxTop
     });
     state.selected = null;
     save();
@@ -1189,19 +1187,8 @@
   }
 
   function setDemo() {
-    state.items = DEMO.map(function (it) {
-      return {
-        id: nextId++,
-        name: it.name,
-        l: it.l,
-        w: it.w,
-        h: it.h,
-        weight: it.weight,
-        qty: it.qty,
-        color: it.color,
-        dest: it.dest || ''
-      };
-    });
+    state.items = demoItems();
+    state.stops = [];
     state.selected = null;
     save();
     runPlan();
@@ -1243,9 +1230,17 @@
     weight: ['peso', 'massa', 'kg', 'weight'],
     qty: ['quantidade', 'qtd', 'qtde', 'quant', 'unidades', 'unid', 'un', 'pecas', 'qty', 'quantity', 'units', 'pcs'],
     dest: ['destino', 'grupo', 'cliente', 'destinatario', 'destination', 'group', 'customer'],
-    color: ['cor', 'color', 'colour']
+    color: ['cor', 'color', 'colour'],
+    orient: ['pode', 'deitar', 'tombar', 'rotacao', 'girar', 'orientacao', 'tilt'],
+    fragile: ['fragil', 'frageis', 'fragile']
   };
-  var POSITIONAL = ['name', 'l', 'w', 'h', 'weight', 'qty', 'dest', 'color'];
+  var POSITIONAL = ['name', 'l', 'w', 'h', 'weight', 'qty', 'dest', 'color', 'orient', 'fragile', 'maxTop'];
+
+  /* "Sim", "S", "X", "1", "yes", "true" */
+  function yes(v) {
+    var t = headerTokens(v)[0];
+    return ['sim', 's', 'x', '1', 'yes', 'y', 'true', 'verdadeiro', 'pode'].indexOf(t) >= 0;
+  }
 
   function cellText(v) {
     return v === undefined || v === null ? '' : String(v).trim();
@@ -1298,6 +1293,12 @@
       if (first === 'l') {
         ambiguousL.push({ idx: idx, tokens: tokens });
         hits++;
+        return;
+      }
+      /* "Peso máx. em cima (kg)", "Empilhamento máx." */
+      if (tokens.indexOf('cima') >= 0 || first === 'empilhamento' || first === 'empilhar' || first === 'stack') {
+        hits++;
+        if (cols.maxTop === undefined) cols.maxTop = idx;
         return;
       }
       Object.keys(FIELD_ALIASES).some(function (f) {
@@ -1422,6 +1423,7 @@
       var color = COLOR_WORDS[colorWord] || COLOR_CYCLE[colorTurn++ % COLOR_CYCLE.length];
       var name = cellText(get(cells, 'name')) || 'Volume ' + (items.length + 1);
 
+      var maxTopRaw = parseNumber(get(cells, 'maxTop'));
       items.push({
         name: name.slice(0, 28),
         l: l,
@@ -1430,7 +1432,10 @@
         weight: weight,
         qty: qty,
         color: color,
-        dest: cellText(get(cells, 'dest')).slice(0, 40)
+        dest: cellText(get(cells, 'dest')).slice(0, 40),
+        orient: yes(get(cells, 'orient')) ? 'any' : 'upright',
+        fragile: yes(get(cells, 'fragile')),
+        maxTop: isFinite(maxTopRaw) && maxTopRaw >= 0 ? Math.round(maxTopRaw) : null
       });
     }
 
@@ -1763,9 +1768,12 @@
   }
 
   function templateCsv() {
-    var lines = ['Descrição;Comprimento (mm);Largura (mm);Altura (mm);Peso (kg);Quantidade;Destino;Cor'];
+    var lines = ['Descrição;Comprimento (mm);Largura (mm);Altura (mm);Peso (kg);Quantidade;Destino;Cor;Pode deitar;Frágil;Peso máx. em cima (kg)'];
     DEMO.forEach(function (it) {
-      lines.push([it.name, it.l, it.w, it.h, it.weight, it.qty, it.dest, COLOR_LABEL[it.color]].join(';'));
+      lines.push([
+        it.name, it.l, it.w, it.h, it.weight, it.qty, it.dest, COLOR_LABEL[it.color],
+        it.orient === 'any' ? 'Sim' : 'Não', it.fragile ? 'Sim' : 'Não', typeof it.maxTop === 'number' ? it.maxTop : ''
+      ].join(';'));
     });
     return lines.join('\r\n') + '\r\n';
   }
@@ -1929,6 +1937,20 @@
       });
     }
     if (els.template) els.template.addEventListener('click', downloadTemplate);
+    if (els.rules) {
+      /* the plan's rules: support, lateral balance, least load on the
+         steering and drive axles, and the time the search may take */
+      els.rules.addEventListener('change', function (e) {
+        var input = e.target;
+        if (!input || !input.dataset || !input.dataset.rule) return;
+        var next = LoadPlan.cleanRules(state.rules);
+        next[input.dataset.rule] = input.value;
+        state.rules = LoadPlan.cleanRules(next);
+        input.value = String(state.rules[input.dataset.rule]);
+        save();
+        runPlan();
+      });
+    }
     if (els.report) {
       els.report.addEventListener('click', function () {
         if (typeof window.print === 'function') window.print();
@@ -1936,6 +1958,19 @@
     }
 
     els.items.addEventListener('click', function (e) {
+      var move = e.target.closest('[data-move]');
+      if (move) {
+        var at = parseInt(move.dataset.stop, 10);
+        var to = move.dataset.move === 'up' ? at - 1 : at + 1;
+        if (to >= 0 && to < state.stops.length) {
+          var d = state.stops[at];
+          state.stops[at] = state.stops[to];
+          state.stops[to] = d;
+          save();
+          runPlan();
+        }
+        return;
+      }
       var del = e.target.closest('[data-remove]');
       if (del) {
         var id = parseInt(del.dataset.remove, 10);
@@ -1987,6 +2022,12 @@
     els.qty = $('#f-qty');
     els.color = $('#f-color');
     els.dest = $('#f-dest');
+    els.orient = $('#f-orient');
+    els.fragile = $('#f-fragile');
+    els.maxTop = $('#f-maxtop');
+    els.rules = $('#plan-rules');
+    els.axleProblems = $('#axle-problems');
+    els.axleStops = $('#axle-stops');
     els.plan = $('#plan');
     els.demo = $('#demo');
     els.clear = $('#clear');
@@ -2017,19 +2058,11 @@
     if (!els.canvas || !els.items) return;
     ctx = els.canvas.getContext('2d');
 
-    if (!load()) {
-      state.items = DEMO.map(function (it) {
-        return {
-          id: nextId++,
-          name: it.name,
-          l: it.l,
-          w: it.w,
-          h: it.h,
-          weight: it.weight,
-          qty: it.qty,
-          color: it.color,
-          dest: it.dest || ''
-        };
+    if (!load()) state.items = demoItems();
+    if (els.rules && els.rules.querySelectorAll) {
+      var rules = LoadPlan.cleanRules(state.rules);
+      Array.prototype.forEach.call(els.rules.querySelectorAll('[data-rule]'), function (input) {
+        input.value = String(rules[input.dataset.rule]);
       });
     }
 

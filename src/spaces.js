@@ -20,25 +20,28 @@
                 the fifth wheel (where the semitrailer's kingpin sits)
      group is what the type filter in the list works with.
      front is how many of the supports form the front group (1 unless said):
-     a bitruck and an 8×2 / 8×4 tractor steer on two front axles, which share
-     the front load as the rear group shares its own. */
+     a bitruck and an 8×2 / 8×4 tractor steer on two front axles, and a 4-axle
+     drawbar trailer turns on a front tandem; they share the front load as the
+     rear group shares its own. */
   var TYPES = [
     { id: 'container', label: 'Contentor', group: 'container', kind: 'box', supports: 0 },
     { id: 'flatbed1', label: 'Plataforma (1 eixo)', group: 'trailer', kind: 'semi', supports: 2 },
     { id: 'flatbed2', label: 'Plataforma (2 eixos)', group: 'trailer', kind: 'semi', supports: 3 },
     { id: 'flatbed3', label: 'Plataforma (3 eixos)', group: 'trailer', kind: 'semi', supports: 4 },
-    { id: 'lorry2', label: 'Camião rígido (2 eixos)', group: 'lorry', kind: 'lorry', supports: 2 },
-    { id: 'lorry3', label: 'Camião rígido (3 eixos)', group: 'lorry', kind: 'lorry', supports: 3 },
-    { id: 'lorry4', label: 'Camião rígido (4 eixos, bitruck)', group: 'lorry', kind: 'lorry', supports: 4, front: 2 },
+    { id: 'lorry2', label: 'Caminhão rígido (2 eixos)', group: 'lorry', kind: 'lorry', supports: 2 },
+    { id: 'lorry3', label: 'Caminhão rígido (3 eixos)', group: 'lorry', kind: 'lorry', supports: 3 },
+    { id: 'lorry4', label: 'Caminhão rígido (4 eixos, bitruck)', group: 'lorry', kind: 'lorry', supports: 4, front: 2 },
     { id: 'semi1', label: 'Semirreboque (1 eixo)', group: 'trailer', kind: 'semi', supports: 2 },
     { id: 'semi2', label: 'Semirreboque (2 eixos)', group: 'trailer', kind: 'semi', supports: 3 },
     { id: 'semi3', label: 'Semirreboque (3 eixos)', group: 'trailer', kind: 'semi', supports: 4 },
     { id: 'semi4', label: 'Semirreboque (4 eixos)', group: 'trailer', kind: 'semi', supports: 5 },
     { id: 'trailer2', label: 'Reboque (2 eixos)', group: 'trailer', kind: 'trailer', supports: 2 },
     { id: 'trailer3', label: 'Reboque (3 eixos)', group: 'trailer', kind: 'trailer', supports: 3 },
+    { id: 'trailer4', label: 'Reboque (4 eixos)', group: 'trailer', kind: 'trailer', supports: 4, front: 2 },
     { id: 'truck2', label: 'Cavalo mecânico (2 eixos)', group: 'tractor', kind: 'tractor', supports: 2 },
     { id: 'truck3', label: 'Cavalo mecânico (3 eixos)', group: 'tractor', kind: 'tractor', supports: 3 },
-    { id: 'truck4', label: 'Cavalo mecânico (4 eixos, 8×2/8×4)', group: 'tractor', kind: 'tractor', supports: 4, front: 2 }
+    { id: 'truck4', label: 'Cavalo mecânico (4 eixos, 2 + 2, 8×2/8×4)', group: 'tractor', kind: 'tractor', supports: 4, front: 2 },
+    { id: 'truck4r', label: 'Cavalo mecânico (4 eixos, 1 + 3)', group: 'tractor', kind: 'tractor', supports: 4 }
   ];
 
   TYPES.forEach(function (t) {
@@ -52,7 +55,7 @@
 
   var GROUPS = [
     { id: 'container', label: 'Contentores' },
-    { id: 'lorry', label: 'Camiões' },
+    { id: 'lorry', label: 'Caminhões' },
     { id: 'trailer', label: 'Reboques e semirreboques' }
   ];
 
@@ -84,7 +87,7 @@
         if (inFront) {
           label = front > 1 ? 'Eixo dianteiro ' + nth : 'Eixo dianteiro';
         } else if (t.kind === 'tractor' && front === 1) {
-          label = nth === 1 ? 'Eixo motriz' : 'Eixo de apoio';
+          label = nth === 1 ? 'Eixo motriz' : rear > 2 ? 'Eixo de apoio ' + (nth - 1) : 'Eixo de apoio';
         } else {
           label = rear > 1 ? 'Eixo traseiro ' + nth : 'Eixo traseiro';
         }
@@ -108,43 +111,43 @@
   var SYSTEM = [
     {
       id: 'van', name: 'Furgão 3,5 t', type: 'lorry2',
-      l: 4300, w: 1800, h: 1900, payload: 1100, track: 1700,
+      l: 4300, w: 1800, h: 1900, payload: 1100, track: 1700, gross: 3500,
       axles: [ax(-1000, 1300, 1800), ax(2600, 900, 2300)]
     },
     {
-      id: 'rigid', name: 'Camião rígido 7,5 t', type: 'lorry2',
-      l: 6100, w: 2450, h: 2400, payload: 3200, track: 1850,
+      id: 'rigid', name: 'Caminhão rígido 7,5 t', type: 'lorry2',
+      l: 6100, w: 2450, h: 2400, payload: 3200, track: 1850, gross: 7500,
       axles: [ax(-1300, 2600, 3700), ax(3900, 1700, 5500)]
     },
     {
-      id: 'rigid18', name: 'Camião rígido 18 t', type: 'lorry2',
-      l: 7300, w: 2480, h: 2600, payload: 9500, track: 2000,
+      id: 'rigid18', name: 'Caminhão rígido 18 t', type: 'lorry2',
+      l: 7300, w: 2480, h: 2600, payload: 9500, track: 2000, gross: 18000,
       axles: [ax(-1400, 4200, 7100), ax(4600, 2800, 11500)]
     },
     {
-      id: 'rigid26', name: 'Camião rígido 26 t', type: 'lorry3',
-      l: 8500, w: 2480, h: 2700, payload: 14000, track: 2000,
+      id: 'rigid26', name: 'Caminhão rígido 26 t', type: 'lorry3',
+      l: 8500, w: 2480, h: 2700, payload: 14000, track: 2000, rearMax: 17000, gross: 26000,
       axles: [ax(-1500, 5000, 7500), ax(5000, 2500, 9500), ax(6350, 2500, 9500)]
     },
     {
       /* bitruck: two steering axles under the cab, a tandem at the rear */
-      id: 'bitruck', name: 'Camião bitruck 4 eixos', type: 'lorry4',
-      l: 10400, w: 2480, h: 2700, payload: 19000, track: 2050,
+      id: 'bitruck', name: 'Caminhão bitruck 4 eixos', type: 'lorry4',
+      l: 10400, w: 2480, h: 2700, payload: 19000, track: 2050, frontMax: 12000, rearMax: 17000, gross: 29000,
       axles: [ax(-2300, 3000, 6000), ax(-950, 2500, 6000), ax(6800, 2300, 8500), ax(8150, 2200, 8500)]
     },
     {
       id: 'semi', name: 'Semirreboque 13,6 m', type: 'semi3',
-      l: 13600, w: 2450, h: 2700, payload: 24000, track: 2050,
+      l: 13600, w: 2450, h: 2700, payload: 24000, track: 2050, rearMax: 25500,
       axles: [ax(1675, 1300, 12000), ax(7985, 2000, 9000), ax(9295, 1700, 9000), ax(10605, 1500, 9000)]
     },
     {
       id: 'mega', name: 'Semirreboque mega', type: 'semi3',
-      l: 13600, w: 2450, h: 3000, payload: 24000, track: 2050,
+      l: 13600, w: 2450, h: 3000, payload: 24000, track: 2050, rearMax: 25500,
       axles: [ax(1675, 1400, 12000), ax(7985, 2050, 9000), ax(9295, 1750, 9000), ax(10605, 1550, 9000)]
     },
     {
       id: 'semi2ax', name: 'Semirreboque 2 eixos', type: 'semi2',
-      l: 13600, w: 2480, h: 2700, payload: 20000, track: 2050,
+      l: 13600, w: 2480, h: 2700, payload: 20000, track: 2050, rearMax: 17000,
       axles: [ax(1675, 1300, 12000), ax(8640, 2100, 9000), ax(9950, 1900, 9000)]
     },
     {
@@ -154,13 +157,25 @@
     },
     {
       id: 'flatbed', name: 'Plataforma 13,6 m', type: 'flatbed3',
-      l: 13600, w: 2480, h: 2700, payload: 27000, track: 2050,
+      l: 13600, w: 2480, h: 2700, payload: 27000, track: 2050, rearMax: 25500,
       axles: [ax(1600, 1100, 12000), ax(7985, 1500, 9000), ax(9295, 1400, 9000), ax(10605, 1300, 9000)]
     },
     {
       id: 'trailer', name: 'Reboque 7,7 m', type: 'trailer2',
       l: 7700, w: 2480, h: 2700, payload: 11000, track: 2050,
       axles: [ax(1300, 1800, 9000), ax(6200, 1800, 9000)]
+    },
+    {
+      /* one axle on the turntable, a tandem at the rear */
+      id: 'trailer3ax', name: 'Reboque 3 eixos', type: 'trailer3',
+      l: 9000, w: 2480, h: 2700, payload: 20000, track: 2050, rearMax: 17000,
+      axles: [ax(1300, 2000, 10000), ax(6600, 1900, 8500), ax(7950, 1900, 8500)]
+    },
+    {
+      /* a tandem on the turntable and a tandem at the rear */
+      id: 'trailer4ax', name: 'Reboque 4 eixos', type: 'trailer4',
+      l: 10000, w: 2480, h: 2700, payload: 25000, track: 2050, frontMax: 17000, rearMax: 17000,
+      axles: [ax(1200, 2000, 8500), ax(2550, 2000, 8500), ax(7600, 1900, 8500), ax(8950, 1900, 8500)]
     },
     {
       id: 'ct20', name: 'Contentor 20 pés', type: 'container',
@@ -181,14 +196,20 @@
     },
     {
       id: 'tractor62', name: 'Cavalo 6×2 com eixo de apoio', type: 'truck3',
-      l: 0, w: 0, h: 0, payload: 20000, track: 2050,
+      l: 0, w: 0, h: 0, payload: 20000, track: 2050, rearMax: 17000,
       axles: [ax(-3600, 5200, 8000), ax(100, 2300, 11500), ax(1450, 1300, 7500)]
     },
     {
       /* 8×2 / 8×4: two steering axles, a tandem behind the fifth wheel */
       id: 'tractor84', name: 'Cavalo 8×4 (4 eixos)', type: 'truck4',
-      l: 0, w: 0, h: 0, payload: 24000, track: 2050,
+      l: 0, w: 0, h: 0, payload: 24000, track: 2050, frontMax: 12000, rearMax: 17000,
       axles: [ax(-3500, 4500, 6000), ax(-2100, 3000, 6000), ax(-250, 2400, 8500), ax(1100, 1600, 8500)]
+    },
+    {
+      /* one steering axle and a rear tridem around the fifth wheel */
+      id: 'tractor4r', name: 'Cavalo 4 eixos (1 + 3)', type: 'truck4r',
+      l: 0, w: 0, h: 0, payload: 25000, track: 2050, rearMax: 25500,
+      axles: [ax(-3900, 5300, 6000), ax(-1200, 2600, 8500), ax(150, 1500, 8500), ax(1500, 1300, 8500)]
     }
   ];
 
@@ -277,8 +298,28 @@
     return isFinite(n) ? n : fallback;
   }
 
+  /* A number that was really given (a blank field is NaN, and NaN comes
+     back from JSON as null). */
+  function has(v) {
+    return typeof v === 'number' && isFinite(v);
+  }
+
+  /* An optional number: rounded when given, null when left blank. */
+  function optional(v, digits) {
+    var n = toNum(v, NaN);
+    if (!isFinite(n)) return null;
+    var f = Math.pow(10, digits || 0);
+    return Math.round(n * f) / f;
+  }
+
   /* A space as stored and used: numbers rounded, the axle list as long as the
-     type asks for. Missing numbers stay NaN so validate() can name them. */
+     type asks for. Missing numbers stay NaN so validate() can name them.
+     Optional limits stay null when not given:
+       share     an axle's share of its group's load, in % (blank = equal)
+       frontMax  the most the front group may carry (a bitruck's steering pair)
+       rearMax   the most the rear group may carry (a tandem or tridem)
+       gross     the most the whole vehicle may weigh, laden (PBT); for a
+                 semitrailer or a tractor, of the combination (PBTC / CMT) */
   function clean(raw) {
     if (!raw || typeof raw !== 'object') return null;
     var t = typeOf(raw.type);
@@ -289,7 +330,8 @@
       axles.push({
         dist: Math.round(toNum(a.dist, NaN)),
         tare: Math.round(toNum(a.tare, NaN)),
-        max: Math.round(toNum(a.max, NaN))
+        max: Math.round(toNum(a.max, NaN)),
+        share: optional(a.share, 1)
       });
     }
     var tractor = t.kind === 'tractor';
@@ -302,6 +344,9 @@
       h: tractor ? 0 : Math.round(toNum(raw.h, NaN)),
       payload: Math.round(toNum(raw.payload, NaN)),
       track: t.supports ? Math.round(toNum(raw.track, NaN)) : 0,
+      frontMax: optional(raw.frontMax),
+      rearMax: optional(raw.rearMax),
+      gross: optional(raw.gross),
       axles: axles,
       origin: raw.origin === 'system' ? 'system' : 'custom',
       created: isString(raw.created) && /^\d{4}-\d{2}-\d{2}$/.test(raw.created) ? raw.created : today()
@@ -324,10 +369,11 @@
   function blank(typeId) {
     var t = typeOf(typeId) || TYPES[0];
     var axles = [];
-    for (var i = 0; i < t.supports; i++) axles.push({ dist: NaN, tare: NaN, max: NaN });
+    for (var i = 0; i < t.supports; i++) axles.push({ dist: NaN, tare: NaN, max: NaN, share: null });
     return {
       id: '', name: '', type: t.id, l: NaN, w: NaN, h: NaN, payload: NaN,
-      track: t.supports ? NaN : 0, axles: axles, origin: 'custom', created: today()
+      track: t.supports ? NaN : 0, frontMax: null, rearMax: null, gross: null,
+      axles: axles, origin: 'custom', created: today()
     };
   }
 
@@ -339,7 +385,7 @@
     next.type = t.id;
     var axles = [];
     for (var i = 0; i < t.supports; i++) {
-      axles.push(space.axles && space.axles[i] ? space.axles[i] : { dist: NaN, tare: NaN, max: NaN });
+      axles.push(space.axles && space.axles[i] ? space.axles[i] : { dist: NaN, tare: NaN, max: NaN, share: null });
     }
     next.axles = axles;
     if (!t.supports) next.track = 0;
@@ -351,8 +397,19 @@
   var LIMITS = {
     l: [500, 20000], w: [500, 3000], h: [300, 4000],
     payload: [1, 60000], track: [1000, 2600],
-    dist: [-8000, 20000], tare: [0, 15000], max: [1, 30000]
+    dist: [-8000, 20000], tare: [0, 15000], max: [1, 30000],
+    groupMax: [1, 60000], gross: [1, 100000], share: [1, 100]
   };
+
+  /* Which supports form the front group and which the rear group. On a
+     semitrailer the front "group" is the kingpin alone. */
+  function groupsOf(typeId) {
+    var t = typeOf(typeId);
+    var out = { front: [], rear: [] };
+    if (!t) return out;
+    for (var i = 0; i < t.supports; i++) (i < t.front ? out.front : out.rear).push(i);
+    return out;
+  }
 
   function inRange(v, key) {
     return isFinite(v) && v >= LIMITS[key][0] && v <= LIMITS[key][1];
@@ -402,6 +459,41 @@
       if (!inRange(a.tare, 'tare')) err('axle' + i + '.tare', name + ': a tara tem de ficar entre 0 e ' + fmtLimit(LIMITS.tare[1]) + ' kg.');
       if (!inRange(a.max, 'max')) err('axle' + i + '.max', name + ': a carga máxima tem de ficar entre 1 e ' + fmtLimit(LIMITS.max[1]) + ' kg.');
     }
+
+    /* the optional limits, when given */
+    var g = groupsOf(t.id);
+    [['frontMax', g.front, 'dianteiro'], ['rearMax', g.rear, 'traseiro']].forEach(function (k) {
+      if (has(s[k[0]]) && k[1].length > 1 && !inRange(s[k[0]], 'groupMax')) {
+        err(k[0], 'A carga máxima do conjunto ' + k[2] + ' tem de ficar entre 1 e ' + fmtLimit(LIMITS.groupMax[1]) + ' kg.');
+      }
+    });
+    if (has(s.gross) && !inRange(s.gross, 'gross')) {
+      err('gross', 'O peso bruto máximo tem de ficar entre 1 e ' + fmtLimit(LIMITS.gross[1]) + ' kg.');
+    }
+    /* shares: all of a group or none, and they add up to 100% */
+    [[g.front, 'dianteiro'], [g.rear, 'traseiro']].forEach(function (k) {
+      var idx = k[0];
+      if (idx.length < 2) return;
+      var given = idx.filter(function (i) {
+        return axles[i] && has(axles[i].share);
+      });
+      if (!given.length) return;
+      var first = 'axle' + idx[0] + '.share';
+      if (given.length < idx.length) {
+        err(first, 'Repartição do conjunto ' + k[1] + ': preencha a % de todos os eixos do conjunto, ou de nenhum (fica igual).');
+        return;
+      }
+      var sum = 0;
+      var bad = false;
+      idx.forEach(function (i) {
+        sum += axles[i].share;
+        if (!inRange(axles[i].share, 'share')) bad = true;
+      });
+      if (bad) err(first, 'Repartição do conjunto ' + k[1] + ': cada eixo leva entre 1 e 100%.');
+      else if (Math.abs(sum - 100) > 0.5) {
+        err(first, 'Repartição do conjunto ' + k[1] + ': as percentagens somam ' + fmtLimit(Math.round(sum * 10) / 10) + '%, têm de somar 100%.');
+      }
+    });
     if (errors.length) return errors;
 
     /* Geometry: supports in order from the front, the right ones where they must be. */
@@ -572,6 +664,11 @@
   }
 
   /* ------------------------------------------------------------ axle loads --- */
+  /* The statics of the plan: moments about the supports, from the centre of
+     gravity of the cargo. Deterministic and cheap, so the arranging (in
+     loadplan.js) calls it for every candidate position as well as for the
+     finished plan. */
+
   /* Two supports at xf < xr carrying W at x: the lever rule. */
   function lever(W, x, xf, xr) {
     var span = xr - xf;
@@ -580,35 +677,90 @@
     return [W - rear, rear];
   }
 
-  function mean(list) {
-    var s = 0;
-    list.forEach(function (v) {
-      s += v;
+  /* The fraction kᵢ of a group's load each of its axles takes: the shares
+     from the catalogue when every axle of the group has one, else equal (a
+     load-equalising suspension). Σ kᵢ = 1. */
+  function fractions(group) {
+    if (group.length > 1 && group.every(function (a) {
+      return has(a.share) && a.share > 0;
+    })) {
+      var sum = 0;
+      group.forEach(function (a) {
+        sum += a.share;
+      });
+      return group.map(function (a) {
+        return a.share / sum;
+      });
+    }
+    return group.map(function () {
+      return 1 / (group.length || 1);
     });
-    return list.length ? s / list.length : 0;
+  }
+
+  /* The equivalent centre of a group: x = Σ kᵢ·xᵢ. */
+  function centre(group, k) {
+    var x = 0;
+    group.forEach(function (a, i) {
+      x += k[i] * a.dist;
+    });
+    return x;
+  }
+
+  /* Loads are compared in whole grams, so a load that equals its limit is
+     never reported over it by a rounding error. */
+  function grams(kg) {
+    return Math.round(kg * 1000);
   }
 
   function status(load, max) {
     if (load < -0.5) return 'over'; /* the support lifts: load ahead of it */
     if (!(max > 0)) return 'ok';
-    var r = load / max;
-    if (r > 1) return 'over';
-    if (r > 0.9) return 'warn';
+    if (grams(load) > grams(max)) return 'over';
+    if (load / max > 0.9) return 'warn';
     return 'ok';
   }
 
+  var GROUP_NAMES = { front: 'Conjunto dianteiro', rear: 'Conjunto traseiro' };
+
   /* cargo: { weight, cgx, cgz } — total placed weight (kg) and its centre of
      gravity in the cargo space (mm from the front wall / from the left wall).
-     Returns { rows, kingpin, leftShare } where every row is
-       { label, letter, part: 'space' | 'tractor' | 'kingpin', x, cargo, tare,
-         load, max, status, left, right }
+     Returns { rows, groups, gross, kingpin, leftShare } where every row is
+       { label, letter, part: 'space' | 'tractor' | 'kingpin', group, role, x,
+         cargo, tare, load, max, status, left, right }
      x is the support's position from the cargo space's front wall. The
      kingpin row is informational when a tractor carries it: its load is then
-     already counted in the tractor's axles. A rear axle group shares its load
-     equally, as a load-equalising suspension does. */
+     already counted in the tractor's axles. groups lists the groups of more
+     than one axle (and any with a limit of its own): { part, side, label,
+     letters, load, max, status }. gross is the laden weight of the vehicle or
+     combination: { load, max, status }. */
   function axleLoads(space, tractor, cargo) {
+    var out = loadsOnSupports(space, tractor, cargo);
+    /* gross weight: the cargo and every tare on the road */
     var t = space && typeOf(space.type);
-    var out = { rows: [], kingpin: null, leftShare: 0.5 };
+    var W = Math.max(0, (cargo && cargo.weight) || 0);
+    var tare = 0;
+    (space && space.axles ? space.axles : []).forEach(function (a) {
+      tare += has(a.tare) ? a.tare : 0;
+    });
+    var withTractor = t && t.kind === 'semi' && out.rows.some(function (r) {
+      return r.part === 'tractor';
+    });
+    if (withTractor) {
+      tractor.axles.forEach(function (a) {
+        tare += has(a.tare) ? a.tare : 0;
+      });
+    }
+    var limits = [];
+    if (space && has(space.gross)) limits.push(space.gross);
+    if (withTractor && has(tractor.gross)) limits.push(tractor.gross);
+    var max = limits.length ? Math.min.apply(null, limits) : null;
+    out.gross = { load: W + tare, max: max, status: max ? status(W + tare, max) : 'ok' };
+    return out;
+  }
+
+  function loadsOnSupports(space, tractor, cargo) {
+    var t = space && typeOf(space.type);
+    var out = { rows: [], groups: [], kingpin: null, leftShare: 0.5 };
     if (!t || !t.supports || !space.axles || space.axles.length < 2) return out;
 
     var W = Math.max(0, (cargo && cargo.weight) || 0);
@@ -621,13 +773,12 @@
 
     var rs = roles(space.type);
     /* front group (one axle, the kingpin, or a bitruck's two steering axles)
-       and rear group, each sharing its load equally */
-    var dist = function (a) {
-      return a.dist;
-    };
+       and rear group, each sharing its load by its fractions kᵢ */
     var frontAx = space.axles.slice(0, t.front);
     var rearAx = space.axles.slice(t.front);
-    var split = lever(W, cgx, mean(frontAx.map(dist)), mean(rearAx.map(dist)));
+    var kf = fractions(frontAx);
+    var kr = fractions(rearAx);
+    var split = lever(W, cgx, centre(frontAx, kf), centre(rearAx, kr));
 
     function row(part, role, a, x, cargoKg) {
       var load = cargoKg + a.tare;
@@ -635,6 +786,8 @@
         label: role.label,
         letter: role.letter,
         part: part,
+        group: role.group,
+        role: role.role,
         x: x,
         cargo: cargoKg,
         tare: a.tare,
@@ -646,14 +799,36 @@
       };
     }
 
+    /* a group of more than one axle, or with its own limit */
+    function addGroup(part, side, rows, max) {
+      if (rows.length < 2 && !has(max)) return;
+      var load = 0;
+      rows.forEach(function (r) {
+        load += r.load;
+      });
+      var letters = rows.length > 1 ? rows[0].letter + '–' + rows[rows.length - 1].letter : rows[0].letter;
+      out.groups.push({
+        part: part,
+        side: side,
+        label: GROUP_NAMES[side],
+        letters: letters,
+        load: load,
+        max: has(max) ? max : null,
+        status: has(max) ? status(load, max) : 'ok'
+      });
+    }
+
     var spaceRows = rearAx.map(function (a, i) {
-      return row('space', rs[t.front + i], a, a.dist, split[1] / rearAx.length);
+      return row('space', rs[t.front + i], a, a.dist, split[1] * kr[i]);
     });
 
     if (t.kind !== 'semi') {
-      out.rows = frontAx.map(function (a, i) {
-        return row('space', rs[i], a, a.dist, split[0] / frontAx.length);
-      }).concat(spaceRows);
+      var frontRows = frontAx.map(function (a, i) {
+        return row('space', rs[i], a, a.dist, split[0] * kf[i]);
+      });
+      out.rows = frontRows.concat(spaceRows);
+      addGroup('space', 'front', frontRows, space.frontMax);
+      addGroup('space', 'rear', spaceRows, space.rearMax);
       return out;
     }
 
@@ -665,6 +840,7 @@
     var tt = tractor && typeOf(tractor.type);
     if (!tt || tt.kind !== 'tractor' || !tractor.axles || tractor.axles.length < 2) {
       out.rows = [kingpin].concat(spaceRows);
+      addGroup('space', 'rear', spaceRows, space.rearMax);
       return out;
     }
 
@@ -677,13 +853,17 @@
     var tf = tt.front || 1;
     var tFront = tractor.axles.slice(0, tf);
     var tRear = tractor.axles.slice(tf);
+    var tkf = fractions(tFront);
+    var tkr = fractions(tRear);
     var K = kingpin.load;
-    var tSplit = lever(K, 0, mean(tFront.map(dist)), mean(tRear.map(dist)));
-    var tractorRows = tFront.map(function (a, i) {
-      return row('tractor', trs[i], a, front.dist + a.dist, tSplit[0] / tFront.length);
-    }).concat(tRear.map(function (a, i) {
-      return row('tractor', trs[tf + i], a, front.dist + a.dist, tSplit[1] / tRear.length);
-    }));
+    var tSplit = lever(K, 0, centre(tFront, tkf), centre(tRear, tkr));
+    var tFrontRows = tFront.map(function (a, i) {
+      return row('tractor', trs[i], a, front.dist + a.dist, tSplit[0] * tkf[i]);
+    });
+    var tRearRows = tRear.map(function (a, i) {
+      return row('tractor', trs[tf + i], a, front.dist + a.dist, tSplit[1] * tkr[i]);
+    });
+    var tractorRows = tFrontRows.concat(tRearRows);
     /* the kingpin load on the left/right wheels follows the cargo's lean too */
     tractorRows.forEach(function (r) {
       var share = r.cargo / (K || 1);
@@ -694,6 +874,9 @@
     });
     kingpin.info = true;
     out.rows = tractorRows.concat([kingpin]).concat(spaceRows);
+    addGroup('tractor', 'front', tFrontRows, tractor.frontMax);
+    addGroup('tractor', 'rear', tRearRows, tractor.rearMax);
+    addGroup('space', 'rear', spaceRows, space.rearMax);
     return out;
   }
 
@@ -724,6 +907,8 @@
     reset: reset,
     filter: filter,
     axleLoads: axleLoads,
+    groupsOf: groupsOf,
+    has: has,
     useStorage: useStorage
   };
 })(typeof window !== 'undefined' ? window : this);
