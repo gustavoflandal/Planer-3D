@@ -91,6 +91,8 @@
     picked: null, /* manual: index in placed of the box the keyboard moves */
     manualEdited: false, /* manual: the operator moved something since the last plan */
     drag: null, /* manual: the box being dragged and where it would land */
+    lash: { on: false, surface: 'padrao', stf: 400 }, /* the securing plan (lashing.js), shown or not */
+    lashResult: null, /* SyncrofinLashing.ideal() for the plan on screen */
     rules: null, /* see loadplan.js; null = the defaults */
     selected: null,
     view: { az: -2.3, elev: 0.4, zoom: 1 }
@@ -112,7 +114,8 @@
       tractor: currentTractor(),
       placed: state.placed,
       names: names,
-      palette: PALETTE
+      palette: PALETTE,
+      straps: state.lash.on && state.lashResult ? state.lashResult.best.plan.straps : null
     };
   }
 
@@ -171,6 +174,7 @@
           stops: state.stops,
           mode: state.mode,
           rules: state.rules,
+          lash: state.lash,
           control: state.control,
           /* by hand the positions are the plan: keep them */
           placed: state.control === 'manual' ? state.placed.map(function (b) {
@@ -226,6 +230,10 @@
       }
       if (data.rules && typeof data.rules === 'object') state.rules = LoadPlan.cleanRules(data.rules);
       state.mode = LoadPlan.cleanMode(data.mode);
+      if (data.lash && window.SyncrofinLashing) {
+        var lo = window.SyncrofinLashing.cleanOptions(data.lash);
+        state.lash = { on: !!data.lash.on, surface: lo.surface, stf: lo.stf };
+      }
       if (data.control === 'manual') {
         state.control = 'manual';
         state.manualEdited = !!data.edited;
@@ -1215,10 +1223,12 @@
   }
 
   function showPlan() {
+    computeLash();
     renderItems();
     renderGauges();
     renderStatus();
     renderAxles();
+    renderLash();
     sceneDirty = true;
     draw();
     notifyPlan();
@@ -1337,6 +1347,7 @@
       data.rules = LoadPlan.cleanRules(state.rules);
       data.colorLabels = COLOR_LABEL;
       data.view = { az: state.view.az, elev: state.view.elev };
+      data.lash = state.lash.on ? state.lashResult : null;
       return data;
     },
     redraw: function () {
@@ -2345,6 +2356,26 @@
     if (els.color) {
       els.color.addEventListener('change', paintColorSelect);
     }
+    if (els.lashToggle) {
+      els.lashToggle.addEventListener('click', function () {
+        state.lash.on = !state.lash.on;
+        save();
+        showPlan();
+        if (state.lash.on && els.lashPanel && els.lashPanel.scrollIntoView) {
+          els.lashPanel.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+        }
+      });
+    }
+    function lashInput() {
+      var o = window.SyncrofinLashing.cleanOptions({ stf: els.lashStf.value, surface: els.lashSurface.value });
+      state.lash.stf = o.stf;
+      state.lash.surface = o.surface;
+      els.lashStf.value = String(o.stf);
+      save();
+      showPlan();
+    }
+    if (els.lashStf && window.SyncrofinLashing) els.lashStf.addEventListener('change', lashInput);
+    if (els.lashSurface && window.SyncrofinLashing) els.lashSurface.addEventListener('change', lashInput);
     if (els.report) {
       els.report.addEventListener('click', function () {
         if (typeof window.print === 'function') window.print();
@@ -2428,6 +2459,14 @@
     els.maxTop = $('#f-maxtop');
     els.rules = $('#plan-rules');
     els.mode = $('#plan-mode');
+    els.lashToggle = $('#lash-toggle');
+    els.lashPanel = $('#lash-panel');
+    els.lashStf = $('#lash-stf');
+    els.lashSurface = $('#lash-surface');
+    els.lashReco = $('#lash-reco');
+    els.lashOptions = $('#lash-options');
+    els.lashSections = $('#lash-sections');
+    els.lashNotes = $('#lash-notes');
     els.modeHelp = $('#mode-help');
     els.axleProblems = $('#axle-problems');
     els.axleStops = $('#axle-stops');
@@ -2497,6 +2536,109 @@
     sel.style.borderLeft = '10px solid ' + (PALETTE[sel.value] || PALETTE.blue);
   }
 
+  /* ------------------------------------------------------------ securing --- */
+  /* The "Amarração" button: the straps the plan needs (lashing.js), drawn
+     over the load and listed in their panel. */
+  function computeLash() {
+    var L = window.SyncrofinLashing;
+    state.lashResult = state.lash.on && L ? L.ideal(currentVehicle(), state.placed, state.lash) : null;
+  }
+
+  function fillLash() {
+    var L = window.SyncrofinLashing;
+    if (!L) return;
+    if (els.lashSurface) {
+      els.lashSurface.innerHTML = '';
+      L.SURFACES.forEach(function (s) {
+        var o = document.createElement('option');
+        o.value = s.id;
+        o.textContent = s.label;
+        els.lashSurface.appendChild(o);
+      });
+      els.lashSurface.value = state.lash.surface;
+    }
+    if (els.lashStf) els.lashStf.value = String(state.lash.stf);
+  }
+
+  function cell(tr, tag, text, cls) {
+    var c = document.createElement(tag);
+    c.textContent = text;
+    if (cls) c.className = cls;
+    tr.appendChild(c);
+    return c;
+  }
+
+  function renderLash() {
+    var on = state.lash.on;
+    if (els.lashToggle) {
+      els.lashToggle.classList.toggle('on', on);
+      els.lashToggle.setAttribute('aria-pressed', on ? 'true' : 'false');
+    }
+    if (!els.lashPanel) return;
+    els.lashPanel.hidden = !on;
+    var r = state.lashResult;
+    if (!on || !r) return;
+    var best = r.best.plan;
+    if (els.lashReco) {
+      els.lashReco.textContent = state.placed.length
+        ? best.total + (best.total === 1 ? ' cinta' : ' cintas') + ' · ' + best.sections.length +
+          (best.sections.length === 1 ? ' seção' : ' seções') + '. ' + r.recommendation
+        : r.recommendation;
+    }
+    /* the options compared */
+    if (els.lashOptions) {
+      var t = els.lashOptions;
+      t.innerHTML = '';
+      var cap = document.createElement('caption');
+      cap.textContent = 'Opções comparadas';
+      t.appendChild(cap);
+      r.options.forEach(function (o) {
+        var tr = document.createElement('tr');
+        if (o === r.best) tr.className = 'best';
+        cell(tr, 'th', o.label);
+        cell(tr, 'td', o.plan.total + (o.plan.total === 1 ? ' cinta' : ' cintas'));
+        t.appendChild(tr);
+      });
+    }
+    /* section by section, for the recommended option */
+    if (els.lashSections) {
+      var s = els.lashSections;
+      s.innerHTML = '';
+      var cap2 = document.createElement('caption');
+      cap2.textContent = 'Cintas por seção (' + r.best.label.toLowerCase() + ')';
+      s.appendChild(cap2);
+      var head = document.createElement('tr');
+      ['Seção', 'Do fundo', 'Peso', 'Altura', 'Frente', 'Laterais', 'Cintas', 'Motivo'].forEach(function (h) {
+        cell(head, 'th', h);
+      });
+      s.appendChild(head);
+      var why = {
+        frente: 'escorregar para a frente', 'trás': 'escorregar para trás', lados: 'escorregar para os lados',
+        'espaçamento': 'uma cinta a cada 2 m', tombamento: 'pilha alta pode tombar'
+      };
+      best.sections.forEach(function (sec) {
+        var tr = document.createElement('tr');
+        cell(tr, 'td', String(sec.index));
+        cell(tr, 'td', fmt(sec.from / 1000, 2) + '–' + fmt(sec.to / 1000, 2) + ' m');
+        cell(tr, 'td', fmt(sec.weight) + ' kg');
+        cell(tr, 'td', fmt(sec.top / 1000, 2) + ' m');
+        cell(tr, 'td', sec.blockedFront ? 'travada' : 'livre', sec.blockedFront ? 'ok' : 'warn');
+        cell(tr, 'td', sec.blockedSides ? 'travada' : 'livre', sec.blockedSides ? 'ok' : 'warn');
+        cell(tr, 'td', String(sec.n), 'n');
+        cell(tr, 'td', (why[sec.why] || '') + (sec.tipping.length && sec.why !== 'tombamento' ? ' · risco de tombar' : ''));
+        s.appendChild(tr);
+      });
+    }
+    if (els.lashNotes) {
+      els.lashNotes.innerHTML = '';
+      best.notes.forEach(function (n) {
+        var li = document.createElement('li');
+        li.textContent = n;
+        els.lashNotes.appendChild(li);
+      });
+    }
+  }
+
   function init() {
     cacheEls();
     if (!els.canvas || !els.items) return;
@@ -2512,6 +2654,7 @@
     fillColors();
     showMode();
     showControl();
+    fillLash();
 
     wireUi();
     wireCanvas();

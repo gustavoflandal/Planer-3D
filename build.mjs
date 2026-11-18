@@ -30,6 +30,7 @@ write('assets/styles.css', css);
 write('assets/app.js', js);
 write('assets/spaces.js', spacesJs);
 write('assets/loadplan.js', read('loadplan.js'));
+write('assets/lashing.js', read('lashing.js'));
 write('assets/spaces-ui.js', spacesUiJs);
 /* the loading-order PDF: a small PDF writer and the document built with it */
 write('assets/pdfwriter.js', read('pdfwriter.js'));
@@ -222,7 +223,7 @@ for (const route of legacyRoutes) {
 
 /* --- small self-check: the page must point at files that were written ------ */
 const problems = [];
-for (const asset of ['assets/styles.css', 'assets/spaces.js', 'assets/loadplan.js', 'assets/app.js', 'assets/spaces-ui.js', 'assets/pdfwriter.js', 'assets/loaddoc.js', 'favicon.svg', 'favicon.ico']) {
+for (const asset of ['assets/styles.css', 'assets/spaces.js', 'assets/loadplan.js', 'assets/app.js', 'assets/spaces-ui.js', 'assets/pdfwriter.js', 'assets/loaddoc.js', 'assets/lashing.js', 'favicon.svg', 'favicon.ico']) {
   if (!html.includes(asset)) problems.push(`index.html does not link ${asset}`);
 }
 /* loadplan.js and app.js read the catalogue from spaces.js, app.js uses

@@ -1170,6 +1170,7 @@ function update(data) {
   const maxX = v.maxX;
 
   boxGroups = addCargo(world, data, deck);
+  addStraps(world, data.straps, deck, data.space.w);
   deckY = deck;
   ghost(null);
 
@@ -1326,6 +1327,51 @@ function render(view, selected) {
   camera.far = dist + radius * 3;
   camera.updateProjectionMatrix();
   renderer.render(scene, camera);
+}
+
+/* ---------------------------------------------------------------- straps --- */
+/* The straps of the securing plan (lashing.js), top-over: from a lashing
+   point on the floor by the left wall, up the side of the load, over its
+   top and down to the right wall, with the ratchet on the right. Planner
+   mm: { x, top, zmin, zmax }. */
+function addStraps(group, straps, deck, W) {
+  if (!straps || !straps.length) return;
+  /* vivid red-orange, so the straps stand out on boxes of any colour */
+  const band = new THREE.MeshBasicMaterial({ color: 0xff3d00 });
+  const dark = mat(0x22262a, { metalness: 0.5, roughness: 0.4 });
+  const up = new THREE.Vector3(0, 1, 0);
+  const P = (x, y, z) => new THREE.Vector3(x * MM, deck + y * MM, -z * MM);
+  function piece(a, b) {
+    const d = b.clone().sub(a);
+    const len = d.length();
+    if (len < 1e-4) return;
+    const m = new THREE.Mesh(new THREE.BoxGeometry(0.075, len, 0.014), band);
+    m.quaternion.setFromUnitVectors(up, d.normalize());
+    m.position.copy(a).add(b).multiplyScalar(0.5);
+    m.castShadow = false;
+    group.add(m);
+  }
+  straps.forEach((s) => {
+    const lift = 14; /* mm off the boxes */
+    const a = P(s.x, 0, 15);
+    const b = P(s.x, s.top + lift, Math.max(0, s.zmin - lift));
+    const c = P(s.x, s.top + lift, Math.min(W, s.zmax + lift));
+    const d = P(s.x, 0, W - 15);
+    piece(a, b);
+    piece(b, c);
+    piece(c, d);
+    /* lashing points and the ratchet */
+    [a, d].forEach((p) => {
+      const ring = new THREE.Mesh(new THREE.BoxGeometry(0.07, 0.03, 0.05), dark);
+      ring.position.copy(p);
+      group.add(ring);
+    });
+    const r = new THREE.Mesh(new THREE.BoxGeometry(0.09, 0.16, 0.05), dark);
+    r.position.copy(c).lerp(d, 0.55);
+    r.position.z -= 0.03;
+    r.quaternion.setFromUnitVectors(up, d.clone().sub(c).normalize());
+    group.add(r);
+  });
 }
 
 /* ------------------------------------------------------- manual editing --- */
@@ -1527,6 +1573,7 @@ function snapshot(o) {
   try {
     v = buildVehicle(group, o.space, o.tractor || null, { closed: false });
     addCargo(group, { placed: o.placed || [], names: o.names, palette: o.palette }, v.deck);
+    addStraps(group, o.straps, v.deck, o.space.w);
   } finally {
     studio = mainStudio;
   }

@@ -450,6 +450,75 @@
       });
     });
 
+    /* ======================================================= securing plan */
+    var lash = data.lash;
+    if (lash && placed.length) {
+      var lp = lash.best.plan;
+      newPage();
+      doc.rect(M, y, CW, 22, { fill: [255, 244, 234] });
+      doc.rect(M, y, 4, 22, { fill: [255, 109, 0] });
+      doc.text(M + 12, y + 15, 'Plano de amarração', { size: 12, bold: true, color: INK });
+      /* (the PDF's standard fonts have no μ) */
+      doc.text(M + CW - 8, y + 15, lp.total + (lp.total === 1 ? ' cinta' : ' cintas') + ' · STF ' + fmt(lp.stf) + ' daN · atrito ' +
+        fmt(lp.mu, 2), { size: 8.5, color: MUTED, align: 'right' });
+      y += 30;
+      paragraph(lash.recommendation, 10, { bold: true });
+      y += 6;
+      if (picture({ placed: placed, straps: lp.straps, frameTo: Math.max(used + 1200, 3000) }, M, y, CW, 230)) y += 240;
+      /* sections */
+      var LC = [
+        { t: 'Seção', w: 40 }, { t: 'Do fundo', w: 82 }, { t: 'Peso', w: 62, r: true }, { t: 'Altura', w: 52, r: true },
+        { t: 'Frente', w: 56 }, { t: 'Laterais', w: 56 }, { t: 'Ângulo', w: 46, r: true }, { t: 'Cintas', w: 44, r: true }, { t: 'Motivo', w: 85 }
+      ];
+      var WHY = { frente: 'frente', 'trás': 'trás', lados: 'lados', 'espaçamento': 'espaçamento', tombamento: 'tombamento' };
+      function lashHead() {
+        doc.rect(M, y, CW, 13, { fill: [238, 241, 244] });
+        var cx = M;
+        LC.forEach(function (c) {
+          doc.text(c.r ? cx + c.w - 4 : cx + 4, y + 9, c.t, { size: 7, bold: true, color: MUTED, align: c.r ? 'right' : 'left' });
+          cx += c.w;
+        });
+        y += 13;
+      }
+      room(30);
+      lashHead();
+      lp.sections.forEach(function (s) {
+        if (room(ROW)) lashHead();
+        var vals = [
+          String(s.index), metres(s.from) + ' – ' + metres(s.to), fmt(s.weight) + ' kg', metres(s.top),
+          s.blockedFront ? 'travada' : 'livre', s.blockedSides ? 'travada' : 'livre', s.alpha + '°', String(s.n),
+          (WHY[s.why] || '') + (s.tipping.length && s.why !== 'tombamento' ? ', tomb.' : '')
+        ];
+        var cx = M;
+        LC.forEach(function (c, i) {
+          doc.text(c.r ? cx + c.w - 4 : cx + 4, y + 8.8, vals[i], { size: 7.5, bold: i === 7, color: INK, align: c.r ? 'right' : 'left' });
+          cx += c.w;
+        });
+        doc.line(M, y + ROW, M + CW, y + ROW, { stroke: [228, 231, 234], lw: 0.4 });
+        y += ROW;
+      });
+      y += 8;
+      /* the options compared */
+      room(20 + lash.options.length * 12);
+      doc.text(M, y + 9, 'OPÇÕES COMPARADAS', { size: 7.5, bold: true, color: MUTED });
+      y += 13;
+      lash.options.forEach(function (o) {
+        var mark = o === lash.best;
+        doc.text(M + 4, y + 9, (mark ? '» ' : '') + o.label, { size: 8.5, bold: mark, color: INK });
+        doc.text(M + 300, y + 9, o.plan.total + (o.plan.total === 1 ? ' cinta' : ' cintas'), { size: 8.5, bold: mark, color: INK, align: 'right' });
+        y += 12;
+      });
+      y += 6;
+      lp.notes.forEach(function (n) {
+        paragraph('• ' + n, 8.5, { x: M + 4, width: CW - 4 });
+      });
+      y += 4;
+      paragraph('Cálculo de amarração por atrito (por cima da carga) da EN 12195-1: 0,8 g para a frente, 0,5 g para trás e para os ' +
+        'lados, fator de segurança 1,1. A parede frontal segura a carga encostada nela até 40% da carga útil (máx. 5 000 daN no baú, ' +
+        'EN 12642 L); as paredes laterais, a carga que ocupa a largura toda; as portas traseiras não contam. Confira com a ' +
+        'Resolução CONTRAN nº 552/2015 e com a etiqueta das cintas.', 7.5, { color: MUTED });
+    }
+
     if (placed.length) {
       room(40);
       y += 14;

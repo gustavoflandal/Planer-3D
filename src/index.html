@@ -167,6 +167,10 @@
         <button type="button" data-control="manual" aria-pressed="false" title="Mova os volumes arrastando com o mouse">Manual</button>
       </nav>
 
+      <nav class="seg lash-seg" aria-label="Amarração da carga">
+        <button type="button" id="lash-toggle" aria-pressed="false" aria-controls="lash-panel" title="Calcula e mostra as cintas de amarração">Amarração</button>
+      </nav>
+
       <div class="gauges">
         <div class="gauge" data-gauge="volume">
           <span>Volume</span><span class="bar"><i></i></span><b>0%</b>
@@ -228,6 +232,30 @@
         <button class="btn line small" id="report" type="button">Relatório</button>
       </span>
     </div>
+
+    <section class="lash-panel" id="lash-panel" aria-label="Amarração da carga" hidden>
+      <div class="lash-head">
+        <h2>Amarração</h2>
+        <label class="lash-field">Cinta (força de tensão STF)
+          <span class="rule-input"><input type="number" id="lash-stf" min="100" max="2000" step="50" inputmode="numeric"> daN</span>
+        </label>
+        <label class="lash-field">Superfície sob a carga
+          <select id="lash-surface"></select>
+        </label>
+      </div>
+      <p class="lash-reco" id="lash-reco" role="status"></p>
+      <div class="lash-body">
+        <table class="lash-options" id="lash-options"></table>
+        <div class="lash-sections-wrap"><table class="lash-sections" id="lash-sections"></table></div>
+      </div>
+      <ul class="lash-notes" id="lash-notes"></ul>
+      <p class="lash-basis">
+        Cálculo de amarração por atrito (por cima da carga) da EN 12195-1: 0,8 g para a frente, 0,5 g para trás e para os lados,
+        fator de segurança 1,1. A parede frontal segura a carga encostada nela até 40% da carga útil (máx. 5 000 daN no baú,
+        EN 12642 L); as paredes laterais, a carga que ocupa a largura toda; as portas traseiras não contam. Confira com a
+        Resolução CONTRAN nº 552/2015 e com a etiqueta das cintas.
+      </p>
+    </section>
 
     <div class="axle-panel" aria-label="Distribuição de peso por eixo">
       <div class="axle-head">
@@ -314,6 +342,7 @@
 
 <script src="assets/spaces.js"></script>
 <script src="assets/loadplan.js"></script>
+<script src="assets/lashing.js"></script>
 <script src="assets/app.js"></script>
 <script src="assets/spaces-ui.js"></script>
 <script src="assets/pdfwriter.js"></script>
