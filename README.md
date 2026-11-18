@@ -115,6 +115,16 @@ O código está em `src/loadplan.js` (sem DOM). O problema é o carregamento de 
 - No fim, campos de assinatura para o responsável pelo carregamento e o conferente; todas as páginas trazem "Página X de N".
 - O PDF é gerado no próprio navegador por `src/pdfwriter.js` (sem bibliotecas), e o documento é montado por `src/loaddoc.js`. Sem WebGL, o documento sai sem as imagens 3D, com as plantas, as vistas laterais e as tabelas.
 
+**Amarração.** O botão **Amarração**, na barra da vista, calcula as cintas que a carga planejada precisa, desenha-as em 3D sobre a carga (laranja, com pontos de amarração e catraca) e abre o painel de amarração. Com ele ligado, a ordem de carregamento em PDF ganha a página "Plano de amarração".
+
+- **Método:** amarração por atrito, com a cinta passando por cima da carga, da EN 12195-1. As acelerações de projeto são 0,8 g para a frente e 0,5 g para trás e para os lados, com fator de segurança 1,1. Por seção: n ≥ (c − μ)·m·g·1,1 / (2·μ·sen α·STF), em que α é o ângulo da cinta com o piso, calculado pela altura da carga e pela distância até o ponto de amarração.
+- **Seções:** a carga é dividida em seções transversais de até cerca de 2,5 m, cortadas entre volumes, com pelo menos uma cinta a cada 2 m.
+- **Travamento:** a parede frontal segura a carga encostada nela (ou encostada em carga que a toca) até 40% da carga útil, com máximo de 5 000 daN no baú (EN 12642 L); no contêiner, 40% da carga útil. As paredes laterais seguram a carga que ocupa a largura toda. Portas traseiras e plataformas não travam.
+- **Ideal:** compara "como está", "com tapete antiderrapante" (μ 0,60), "com calços nos vãos" (vãos de até 40 cm ao longo do baú e 30 cm de folga lateral) e os dois juntos, e recomenda a opção com menos cintas.
+- **Painel:** força de tensão da cinta (STF, padrão 400 daN) e superfície sob a carga (μ 0,20 a 0,60); a recomendação, a comparação das opções e a tabela por seção (posição, peso, altura, frente e laterais travadas, cintas e motivo).
+- **Avisos:** cantoneiras nas arestas, volumes frágeis no topo, pilhas que podem tombar, alturas diferentes sob a mesma cinta (as pilhas mais baixas não ficam presas) e parede frontal sobrecarregada.
+- O cálculo fica em `src/lashing.js`. É uma ajuda de planejamento: confira com a Resolução CONTRAN nº 552/2015 e com a etiqueta das cintas.
+
 **Entregas (modo por itinerário).** Os destinos da lista são as paradas, na ordem mostrada ("Entrega 1, 2…"), que se muda com ↑ e ↓. A última entrega é carregada primeiro e vai para a frente. Ao empurrar volumes para trás por causa dos eixos, o sistema reserva no fundo o comprimento de que as entregas anteriores precisam. O painel de peso por eixo mostra a lista de problemas e uma tabela com o uso de cada eixo na saída e depois de cada entrega.
 
 **Regras do plano.** Ficam no painel à esquerda: apoio mínimo, desbalanceamento lateral máximo, carga mínima no eixo dianteiro e no de tração, e tempo de otimização. Cada volume tem as suas regras no formulário: posição (em pé ou deitar), peso máximo em cima (vazio = sem limite, 0 = não empilhar) e frágil.

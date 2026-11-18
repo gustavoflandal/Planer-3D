@@ -11,7 +11,7 @@ import zlib from 'node:zlib';
 const here = path.dirname(fileURLToPath(import.meta.url));
 const srcFile = (name) => fs.readFileSync(path.join(here, '..', 'src', name), 'utf8');
 /* the page loads these three, in this order */
-const SCRIPTS = ['spaces.js', 'loadplan.js', 'app.js', 'spaces-ui.js', 'pdfwriter.js', 'loaddoc.js'];
+const SCRIPTS = ['spaces.js', 'loadplan.js', 'lashing.js', 'app.js', 'spaces-ui.js', 'pdfwriter.js', 'loaddoc.js'];
 
 const log = { fills: 0, strokes: 0, moves: 0 };
 
@@ -740,6 +740,39 @@ try {
     (text.match(/\/Type \/Page /g) || []).length === doc.pages && (text.match(/\(P\\341gina /g) || []).length === doc.pages]);
   checks.push(['PDF: accents written in WinAnsi', text.includes('(Etapa 1 de ') && /\(Planejamento|PLANEJAMENTO/.test(text) &&
     text.includes('\\341') && /\.pdf$/.test(doc.name)]);
+  /* securing (lashing.js) */
+  const Lash = window.SyncrofinLashing;
+  const flat = Spaces.get('flatbed');
+  const semiL = Spaces.get('semi');
+  const one = (vehicle, x, w) => [{ id: 1, name: 'Caixa', x: x, y: 0, z: 0, l: 1200, w: w, h: 1000, weight: 1000, fragile: false, maxTop: Infinity }];
+  const onFlat = Lash.plan(flat, one(flat, 3000, 1000), { surface: 'padrao', stf: 400 });
+  const sec = onFlat.sections[0];
+  const per = (2 * 0.3 * sec.sinA * 400) / 1.1;
+  const want = Math.ceil(((0.8 - 0.3) * 1000 * 0.981) / per - 1e-9);
+  checks.push(['lashing: EN 12195-1 top-over count on a platform', sec.need.forward === want && sec.n === want && !sec.blockedFront && !sec.blockedSides &&
+    sec.need.side === Math.ceil((0.2 * 981) / per - 1e-9)]);
+  const blocked = Lash.plan(semiL, one(semiL, 0, semiL.w), { surface: 'padrao', stf: 400 });
+  checks.push(['lashing: front and side walls hold a load against them', blocked.sections[0].blockedFront && blocked.sections[0].blockedSides &&
+    blocked.sections[0].need.forward === 0 && blocked.sections[0].need.side === 0 && blocked.sections[0].need.backward > 0]);
+  const away = Lash.plan(semiL, one(semiL, 2000, semiL.w), { surface: 'padrao', stf: 400 });
+  const filled = Lash.plan(semiL, one(semiL, 300, semiL.w), { surface: 'padrao', stf: 400, fill: true });
+  checks.push(['lashing: a gap to the wall unblocks, a filler closes it', !away.sections[0].blockedFront && filled.sections[0].blockedFront]);
+  const choice = Lash.ideal(flat, one(flat, 3000, 1000), { surface: 'padrao', stf: 400 });
+  checks.push(['lashing: the anti-slip mat cuts the straps and is recommended', choice.best.key !== 'base' &&
+    choice.best.plan.total < choice.options[0].plan.total && /tapete/i.test(choice.recommendation)]);
+  const full = Lash.ideal(data.space, placed, { surface: 'padrao', stf: 400 });
+  const fp = full.options[0].plan;
+  const covered = fp.sections.reduce((n, s) => n + s.boxes.length, 0);
+  checks.push(['lashing: every box in one section, straps over the load', covered === placed.length && fp.total === fp.straps.length &&
+    fp.straps.every((st) => {
+      const s = fp.sections[st.section - 1];
+      return st.x >= s.from && st.x <= s.to && st.top > 0 && st.zmax > st.zmin;
+    }) && fp.sections.every((s) => s.n >= Math.ceil((s.to - s.from) / 2000 - 1e-9))]);
+  const withLash = window.SyncrofinLoadDoc.build(Object.assign({}, data, { lash: full }));
+  const lashText = Buffer.from(withLash.bytes).toString('latin1');
+  checks.push(['PDF: securing page when the lashing is on', lashText.includes('(Plano de amarra\\347\\343o)') && withLash.pages >= doc.pages &&
+    !Buffer.from(doc.bytes).toString('latin1').includes('(Plano de amarra')]);
+
   const Pdf = window.SyncrofinPdf;
   checks.push(['PDF text width and wrapping', Math.abs(Pdf.textWidth('Ação', 10, false) - (667 + 500 + 556 + 556) / 100) < 0.01 &&
     Pdf.wrap('carregue sempre do fundo para as portas', 10, false, 80).every((l) => Pdf.textWidth(l, 10, false) <= 80)]);

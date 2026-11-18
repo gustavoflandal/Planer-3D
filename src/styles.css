@@ -896,6 +896,143 @@ button {
   margin-left: auto;
 }
 
+/* ------------------------------------------------------------ lash panel --- */
+.lash-seg button.on {
+  background: #ff6d00;
+  color: #fff;
+}
+
+.lash-panel {
+  flex: 0 0 auto;
+  padding: 12px 20px 14px;
+  background: #fff;
+  border-top: 1px solid var(--line);
+}
+
+.lash-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: 10px 24px;
+}
+
+.lash-head h2,
+.lash-reco {
+  margin: 0;
+  font-size: 18px;
+  color: var(--ink);
+}
+
+.lash-field {
+  display: grid;
+  gap: 4px;
+  color: var(--muted);
+}
+
+.lash-field select,
+.lash-field input {
+  padding: 6px 8px;
+  border: 1px solid var(--line-strong);
+  border-radius: 6px;
+  background: var(--input);
+  color: var(--ink);
+  font: inherit;
+  max-width: 100%;
+}
+
+.lash-field input {
+  width: 90px;
+}
+
+.lash-reco {
+  margin-top: 12px;
+  padding: 10px 12px;
+  border-left: 4px solid #ff6d00;
+  background: #fff4ea;
+  font-weight: 700;
+}
+
+.lash-body {
+  display: grid;
+  grid-template-columns: minmax(0, 300px) minmax(0, 1fr);
+  gap: 16px;
+  margin-top: 12px;
+  align-items: start;
+}
+
+.lash-sections-wrap {
+  overflow-x: auto;
+}
+
+.lash-options,
+.lash-sections {
+  width: 100%;
+  border-collapse: collapse;
+  color: var(--ink);
+}
+
+.lash-options caption,
+.lash-sections caption {
+  text-align: left;
+  font-weight: 700;
+  color: var(--muted);
+  padding-bottom: 6px;
+}
+
+.lash-options th,
+.lash-options td,
+.lash-sections th,
+.lash-sections td {
+  padding: 5px 8px;
+  border-bottom: 1px solid var(--line);
+  text-align: left;
+  white-space: nowrap;
+}
+
+.lash-sections th {
+  color: var(--muted);
+}
+
+.lash-options th {
+  white-space: normal;
+  font-weight: inherit;
+}
+
+.lash-options tr.best {
+  background: #fff4ea;
+  font-weight: 700;
+}
+
+.lash-sections td.n {
+  font-weight: 700;
+}
+
+.lash-sections td.ok {
+  color: #3f8c46;
+}
+
+.lash-sections td.warn {
+  color: #b7791f;
+}
+
+.lash-notes {
+  margin: 12px 0 0;
+  padding-left: 20px;
+  color: var(--text);
+}
+
+.lash-basis {
+  margin: 10px 0 0;
+  color: var(--muted);
+  line-height: 1.45;
+}
+
+@media (max-width: 720px) {
+  .lash-body {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
 /* ------------------------------------------------------------- axle panel --- */
 .axle-panel {
   flex: 0 0 auto;
