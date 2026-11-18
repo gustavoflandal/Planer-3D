@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Syncrofin 3D Planner — camiões e contentores</title>
+<title>Syncrofin 3D Planner — caminhões e contentores</title>
 <meta name="description" content="Planeador de carga em 3D: escolha o veículo, introduza a carga, coloque os volumes automaticamente e veja o aproveitamento de espaço, peso e área.">
 <meta name="color-scheme" content="light">
 <link rel="icon" href="favicon.svg" type="image/svg+xml">
@@ -93,14 +93,52 @@
         </div>
       </div>
 
+      <div class="grid3 rules-row">
+        <div class="field">
+          <label for="f-orient">Posição</label>
+          <select id="f-orient" name="orient" title="Este lado para cima: só gira no plano do chão. Pode deitar: qualquer face pode ficar para baixo.">
+            <option value="upright">Em pé</option>
+            <option value="any">Deitar</option>
+          </select>
+        </div>
+        <div class="field">
+          <label for="f-maxtop" title="Peso máximo que o volume aguenta em cima (kg). Vazio = sem limite; 0 = não empilhar.">Em cima kg</label>
+          <input id="f-maxtop" name="maxTop" type="number" inputmode="numeric" min="0" max="100000" step="1" placeholder="livre"
+            title="Peso máximo que o volume aguenta em cima (kg). Vazio = sem limite; 0 = não empilhar.">
+        </div>
+        <div class="field check-field">
+          <label for="f-fragile">Frágil</label>
+          <span class="check-box"><input id="f-fragile" name="fragile" type="checkbox"> <span>sim</span></span>
+        </div>
+      </div>
+
       <button class="btn dark" type="submit">Adicionar item</button>
       <p class="form-msg" id="form-msg" role="status"></p>
       <p class="import-hint">
         Também pode importar volumes de uma planilha Excel (.xlsx) ou CSV com as colunas
-        Descrição, Comprimento, Largura, Altura (mm), Peso (kg por unidade), Quantidade, Destino e Cor.
+        Descrição, Comprimento, Largura, Altura (mm), Peso (kg por unidade), Quantidade, Destino e Cor
+        (e, se quiser, Pode deitar, Frágil e Peso máx. em cima).
         <button class="link-btn" id="template" type="button">Baixar modelo CSV</button>
       </p>
     </form>
+
+    <details class="plan-rules" id="plan-rules">
+      <summary>Regras do plano</summary>
+      <div class="rules-grid">
+        <label>Apoio mínimo da base <span class="rule-input"><input type="number" data-rule="support" min="50" max="100" step="5"> %</span></label>
+        <label>Desbalanceamento lateral máx. <span class="rule-input"><input type="number" data-rule="lateral" min="1" max="50" step="1"> %</span></label>
+        <label>Carga mín. no eixo dianteiro <span class="rule-input"><input type="number" data-rule="minFront" min="0" max="60" step="1"> %</span></label>
+        <label>Carga mín. no eixo de tração <span class="rule-input"><input type="number" data-rule="minDrive" min="0" max="60" step="1"> %</span></label>
+        <label>Tempo de otimização <span class="rule-input"><input type="number" data-rule="budget" min="0" max="30" step="0.5"> s</span></label>
+      </div>
+      <p class="rules-note">
+        Cada volume tem a sua posição (em pé = este lado para cima; deitar = qualquer face para baixo), o peso que aguenta
+        em cima (vazio = sem limite, 0 = não empilhar) e se é frágil (nada vai em cima dele).
+        O lateral conta a partir de 50/50 (10% = até 60% de um lado). A carga mínima no dianteiro é a parte do peso do
+        caminhão (ou do cavalo) sobre os eixos da frente; a do eixo de tração, a parte do peso bruto total.
+        Os destinos da lista são as entregas, na ordem mostrada: a última entrega vai para a frente do baú.
+      </p>
+    </details>
 
     <ul class="items" id="items"></ul>
     <p class="empty" id="empty" hidden>
@@ -186,6 +224,8 @@
         <ul class="axle-list" id="axle-list"></ul>
       </div>
       <p class="axle-cog" id="axle-cog"></p>
+      <ul class="axle-problems" id="axle-problems" aria-live="polite" hidden></ul>
+      <div class="axle-stops" id="axle-stops" hidden></div>
     </div>
   </section>
 
@@ -259,6 +299,7 @@
 </footer>
 
 <script src="assets/spaces.js"></script>
+<script src="assets/loadplan.js"></script>
 <script src="assets/app.js"></script>
 <script src="assets/spaces-ui.js"></script>
 <script type="module" src="assets/scene3d.js"></script>

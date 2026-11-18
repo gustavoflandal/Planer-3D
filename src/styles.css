@@ -404,8 +404,11 @@ button {
 }
 
 .group-head {
+  display: flex;
+  align-items: center;
+  gap: 4px;
   margin: 6px 0 -2px;
-  padding: 4px 8px;
+  padding: 4px 4px 4px 8px;
   border-radius: 6px;
   background: var(--bg);
   color: var(--text);
@@ -413,6 +416,113 @@ button {
   font-weight: 700;
   text-transform: uppercase;
   letter-spacing: 0.04em;
+}
+
+.group-title {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* move a delivery earlier or later in the route */
+.stop-move {
+  flex: 0 0 auto;
+  width: 28px;
+  height: 26px;
+  padding: 0;
+  border: 1px solid var(--line-strong);
+  border-radius: 5px;
+  background: #fff;
+  color: var(--ink);
+  font-size: 15px;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.stop-move:hover:not(:disabled) {
+  border-color: var(--ink);
+}
+
+.stop-move:disabled {
+  opacity: 0.35;
+  cursor: default;
+}
+
+/* the item rules: way up, weight on top, fragile */
+.check-field .check-box {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 40px;
+  font-size: 14px;
+  color: var(--text);
+}
+
+.check-field .check-box input {
+  width: 18px;
+  height: 18px;
+  margin: 0;
+  padding: 0;
+}
+
+.plan-rules {
+  margin: 12px 0 4px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: #fbfcfd;
+}
+
+.plan-rules summary {
+  padding: 9px 12px;
+  font-size: 14px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--muted);
+  cursor: pointer;
+}
+
+.rules-grid {
+  display: grid;
+  gap: 8px;
+  padding: 0 12px;
+}
+
+.rules-grid label {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  font-size: 14px;
+  color: var(--text);
+}
+
+.rule-input {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  flex: 0 0 auto;
+  color: var(--muted);
+}
+
+.rule-input input {
+  width: 72px;
+  padding: 6px 8px;
+  border: 1px solid var(--line-strong);
+  border-radius: 6px;
+  background: var(--input);
+  font: inherit;
+  color: var(--ink);
+  text-align: right;
+}
+
+.rules-note {
+  margin: 10px 12px 12px;
+  font-size: 13px;
+  line-height: 1.45;
+  color: var(--muted);
 }
 
 .item-row {
@@ -786,6 +896,97 @@ button {
   margin: 8px 0 0;
   font-size: 14px;
   color: var(--muted);
+}
+
+/* a group of axles (tandem, tridem, steering pair) */
+.axle-item.group {
+  background: var(--bg);
+  border-style: dashed;
+}
+
+/* what the checker found, as the plan leaves and after each delivery */
+.axle-problems {
+  list-style: none;
+  margin: 8px 0 0;
+  padding: 0;
+  display: grid;
+  gap: 4px;
+  font-size: 14px;
+  line-height: 1.4;
+}
+
+.axle-problems li {
+  padding: 6px 10px 6px 12px;
+  border-left: 3px solid var(--line-strong);
+  border-radius: 4px;
+  background: var(--bg);
+  color: var(--ink);
+}
+
+.axle-problems li.hard {
+  border-left-color: #d64545;
+  background: #fdf0ef;
+}
+
+.axle-problems li.soft {
+  border-left-color: var(--amber);
+  background: #fdf7ea;
+}
+
+.axle-problems li.ok {
+  border-left-color: var(--green);
+  background: #f1f8ef;
+}
+
+.axle-stops {
+  margin-top: 10px;
+  overflow-x: auto;
+}
+
+.stops-table {
+  border-collapse: collapse;
+  font-size: 13px;
+  white-space: nowrap;
+}
+
+.stops-table caption {
+  margin-bottom: 4px;
+  text-align: left;
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--muted);
+}
+
+.stops-table th,
+.stops-table td {
+  padding: 4px 10px;
+  border-bottom: 1px solid var(--line);
+  text-align: right;
+}
+
+.stops-table th:first-child {
+  text-align: left;
+  font-weight: 600;
+  color: var(--text);
+}
+
+.stops-table tr:first-child th {
+  color: var(--muted);
+  font-weight: 700;
+}
+
+.stops-table td.st-ok {
+  color: #3f7a36;
+}
+
+.stops-table td.st-warn {
+  color: #9a6a00;
+  font-weight: 700;
+}
+
+.stops-table td.st-over {
+  color: #b42318;
+  font-weight: 700;
 }
 
 /* ------------------------------------------------------------ foot note --- */
@@ -1429,6 +1630,36 @@ button {
   width: 100%;
   height: auto;
   font-family: var(--font);
+}
+
+.sf-ref {
+  padding: 10px 12px;
+  border-left: 3px solid #e3a21a;
+  border-radius: 4px;
+  background: #fbf6ea;
+  color: var(--ink, #2f3337);
+  font-size: 14px;
+  line-height: 1.45;
+}
+
+.sf-ref p {
+  margin: 0;
+}
+
+.sf-ref p + p {
+  margin-top: 4px;
+}
+
+.sf-ref .sf-ref-head {
+  font-weight: 700;
+}
+
+.sf-diagram-warn {
+  margin: 6px 4px 2px;
+  padding: 0 0 0 18px;
+  color: #b3261e;
+  font-size: 14px;
+  line-height: 1.4;
 }
 
 .sf-fields {

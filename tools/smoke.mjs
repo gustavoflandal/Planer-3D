@@ -11,7 +11,7 @@ import zlib from 'node:zlib';
 const here = path.dirname(fileURLToPath(import.meta.url));
 const srcFile = (name) => fs.readFileSync(path.join(here, '..', 'src', name), 'utf8');
 /* the page loads these three, in this order */
-const SCRIPTS = ['spaces.js', 'app.js', 'spaces-ui.js'];
+const SCRIPTS = ['spaces.js', 'loadplan.js', 'app.js', 'spaces-ui.js'];
 
 const log = { fills: 0, strokes: 0, moves: 0 };
 
@@ -92,7 +92,8 @@ function node(tag = 'div') {
 
 const ids = [
   '#view', '#axle-view', '#items', '#empty', '#cargo-count', '#item-form', '#form-msg',
-  '#f-name', '#f-l', '#f-w', '#f-h', '#f-weight', '#f-qty', '#f-color', '#f-dest',
+  '#f-name', '#f-l', '#f-w', '#f-h', '#f-weight', '#f-qty', '#f-color', '#f-dest', '#f-orient', '#f-fragile', '#f-maxtop',
+  '#axle-problems', '#axle-stops',
   '#plan', '#demo', '#clear', '#report', '#status', '#vehicle-dims',
   '#axle-list', '#axle-cog', '#nav-toggle', '#topbar', '#import', '#import-file', '#template'
 ];
@@ -172,7 +173,7 @@ const checks = [];
 const canvas = elements['#view'];
 checks.push(['canvas sized', canvas.width > 0 && canvas.height > 0]);
 checks.push(['3D drawing happened', log.fills > 3 && log.strokes > 0]);
-checks.push(['catalogue loaded', Spaces.all().length === 17 && Spaces.cargoSpaces().length === 14 && Spaces.tractors().length === 3]);
+checks.push(['catalogue loaded', Spaces.all().length === 20 && Spaces.cargoSpaces().length === 16 && Spaces.tractors().length === 4]);
 checks.push(['default is the semitrailer with a tractor', String(elements['#vehicle-dims'].textContent).startsWith('Semirreboque 13,6 m + Cavalo padrão')]);
 checks.push(['cargo rows rendered', elements['#items'].children.length > 0]);
 checks.push(['status written', String(elements['#status'].textContent).length > 5]);
@@ -191,7 +192,9 @@ checks.push(['volume gauge above 20%', parseFloat(gauges[0].barFill.style.width)
    destination field must split the item list into the groups the demo items
    declare. */
 const digits = (s) => parseInt(String(s).replace(/[^0-9]/g, '') || '0', 10);
-const axleRows = elements['#axle-list'].children;
+/* one row per axle (and the kingpin); group rows come after them */
+const axleRows = elements['#axle-list'].children.filter((li) => !/\bgroup\b/.test(li.className));
+const groupRows = elements['#axle-list'].children.filter((li) => /\bgroup\b/.test(li.className));
 const axleLoads = axleRows.filter((li) => !/\binfo\b/.test(li.className)).map((li) => {
   const val = li.children[2];
   return val ? digits(val.textContent) : 0;
@@ -212,12 +215,18 @@ checks.push(['axle list: 2 tractor axles, kingpin, 3 trailer axles', axleRows.le
   axleRows.filter((li) => /\binfo\b/.test(li.className)).length === 1]);
 checks.push(['axle loads sum to cargo + tare', Math.abs(axleSum - (cargoWeight + tare)) <= 6]);
 checks.push(['axle-cog written', String(elements['#axle-cog'].textContent).includes('Centro de gravidade')]);
+checks.push(['semitrailer axle group listed with its limit', groupRows.length === 1 &&
+  /25\s?500/.test(groupRows[0].children[3].textContent)]);
+const heads = elements['#items'].children.filter((li) => li.className === 'group-head');
 checks.push([
-  'destination groups rendered',
-  elements['#items'].children.some(
-    (li) => li.className === 'group-head' && li.textContent === 'FruitPlanet Corp'
-  )
+  'destinations listed as numbered deliveries with reorder buttons',
+  heads.length === 2 && heads[0].children[0].textContent === 'Entrega 1 · FruitPlanet Corp' &&
+    heads[1].children[0].textContent === 'Entrega 2 · Grupo 1' && heads[0].children.length === 3
 ]);
+checks.push(['problem list says the axles are within limits after each delivery',
+  elements['#axle-problems'].children.length === 1 && /depois de cada entrega/.test(elements['#axle-problems'].children[0].textContent)]);
+checks.push(['delivery table: departure and after delivery 1', !elements['#axle-stops'].hidden &&
+  elements['#axle-stops'].children[0].children.length === 4]);
 checks.push(['linear gauge in metres', /m$/.test(gauges[3].valueEl.textContent || '')]);
 
 /* The menu button only exists on narrow screens, but its wiring must be sound:
@@ -328,6 +337,12 @@ async function importChecks() {
   out.push(['template CSV imports back as the demo', tpl.items.length === 4 && !tpl.skipped.length &&
     tpl.items[0].name === 'Palete EUR' && tpl.items[0].color === 'blue' && tpl.items[3].color === 'orange' &&
     tpl.items[0].dest === 'FruitPlanet Corp']);
+  out.push(['template CSV keeps fragile and weight on top', tpl.items[2].fragile === true && tpl.items[3].maxTop === 300 &&
+    tpl.items[0].orient === 'upright' && tpl.items[0].fragile === false && tpl.items[0].maxTop === null]);
+  const rules = imp.rowsToItems(imp.parseCsv('Descrição;Comp;Larg;Alt;Peso;Qtd;Pode deitar;Frágil;Peso máx. em cima (kg)\r\nTubo;3000;300;300;40;5;Sim;Não;0\r\nVidro;1000;800;600;80;2;não;sim;\r\n'), semi);
+  out.push(['csv: may tip, fragile and weight on top columns', rules.items.length === 2 &&
+    rules.items[0].orient === 'any' && !rules.items[0].fragile && rules.items[0].maxTop === 0 && rules.items[0].weight === 40 &&
+    rules.items[1].orient === 'upright' && rules.items[1].fragile && rules.items[1].maxTop === null]);
 
   let oldXls = '';
   await imp.readSpreadsheet(new Uint8Array([0xd0, 0xcf, 0x11, 0xe0, 0, 0])).catch((e) => { oldXls = e.message; });
@@ -352,11 +367,14 @@ function spaceChecks() {
   const fakeStore = { getItem: (k) => (mem.has(k) ? mem.get(k) : null), setItem: (k, v) => mem.set(k, String(v)) };
   Spaces.useStorage(fakeStore);
 
-  out.push(['16 space types', Spaces.TYPES.length === 16]);
+  out.push(['18 space types', Spaces.TYPES.length === 18]);
   out.push(['4-axle types: semitrailer, bitruck, tractor', ['semi4', 'lorry4', 'truck4'].every((id) => Spaces.typeOf(id))]);
   out.push(['roles: semitrailer with 4 axles runs A to E', Spaces.roles('semi4').map((r) => r.letter).join('') === 'ABCDE']);
   out.push(['roles: bitruck steers on A and B', Spaces.roles('lorry4').map((r) => r.group).join() === 'front,front,rear,rear' &&
     Spaces.roles('lorry4')[1].label === 'Eixo dianteiro 2']);
+  out.push(['roles: 3-axle trailer turns on A, tandem at the rear', Spaces.roles('trailer3').map((r) => r.group).join() === 'front,rear,rear']);
+  out.push(['roles: 4-axle trailer turns on A and B', Spaces.roles('trailer4').map((r) => r.group).join() === 'front,front,rear,rear']);
+  out.push(['built-in 3- and 4-axle trailers are valid', ['trailer3ax', 'trailer4ax'].every((id) => Spaces.get(id) && !Spaces.validate(Spaces.get(id)).length)]);
   out.push(['roles: semitrailer A is the kingpin', Spaces.roles('semi3').map((r) => r.letter + r.role).join() === 'Akingpin,Baxle,Caxle,Daxle']);
 
   const blankErrors = Spaces.validate(Spaces.blank('semi3'));
@@ -377,12 +395,12 @@ function spaceChecks() {
 
   const saved = Spaces.save(good);
   out.push(['custom space saved', saved.ok && saved.space.origin === 'custom' && /^\d{4}-\d{2}-\d{2}$/.test(saved.space.created) &&
-    Spaces.all().length === 18]);
+    Spaces.all().length === 21]);
   const id = saved.space.id;
   out.push(['custom space persisted', JSON.parse(mem.get('syncrofin.spaces.v1')).custom.length === 1]);
 
   out.push(['type filter: containers', Spaces.filter(Spaces.cargoSpaces(), { groups: ['container'] }).length === 3]);
-  out.push(['type filter: lorries + trailers', Spaces.filter(Spaces.cargoSpaces(), { groups: ['lorry', 'trailer'] }).length === 12]);
+  out.push(['type filter: lorries + trailers', Spaces.filter(Spaces.cargoSpaces(), { groups: ['lorry', 'trailer'] }).length === 14]);
   Spaces.toggleFavorite(id);
   out.push(['favourites filter', Spaces.filter(Spaces.cargoSpaces(), { favoritesOnly: true }).map((s) => s.id).sort().join() === [id, 'semi'].sort().join()]);
 
@@ -425,6 +443,11 @@ function spaceChecks() {
   const bt = Spaces.axleLoads(bitruck, null, { weight: 6000, cgx: frontMid, cgz: bitruck.w / 2 });
   out.push(['bitruck: cargo over the steering pair is shared by A and B', bt.rows.length === 4 &&
     Math.abs(bt.rows[0].cargo - 3000) < 1 && Math.abs(bt.rows[1].cargo - 3000) < 1 && Math.abs(bt.rows[2].cargo) < 1]);
+  const tr4 = Spaces.get('trailer4ax');
+  const tr4Mid = ((tr4.axles[0].dist + tr4.axles[1].dist) / 2 + (tr4.axles[2].dist + tr4.axles[3].dist) / 2) / 2;
+  const t4 = Spaces.axleLoads(tr4, null, { weight: 8000, cgx: tr4Mid, cgz: tr4.w / 2 });
+  out.push(['4-axle trailer: cargo midway is shared by all four axles', t4.rows.length === 4 &&
+    t4.rows.every((r) => Math.abs(r.cargo - 2000) < 1)]);
   const semi4 = Spaces.get('semi4ax');
   const s4 = Spaces.axleLoads(semi4, null, { weight: 20000, cgx: 8000, cgz: semi4.w / 2 });
   out.push(['4-axle semitrailer: kingpin + 4 axles carry cargo + tare', s4.rows.length === 5 &&
@@ -435,6 +458,15 @@ function spaceChecks() {
   out.push(['4-axle tractor carries the kingpin on its 4 axles', t84Rows.length === 4 &&
     Math.abs(t84Rows.reduce((t, r) => t + r.load, 0) - (s4t.kingpin.load + tareOf(t84))) < 1 &&
     Math.abs(t84Rows[0].cargo - t84Rows[1].cargo) < 1 && Math.abs(t84Rows[2].cargo - t84Rows[3].cargo) < 1]);
+  const t4r = Spaces.get('tractor4r');
+  out.push(['1 + 3 tractor: one steering axle, a rear tridem', Spaces.roles('truck4r').map((r) => r.group).join() === 'front,rear,rear,rear' &&
+    Spaces.roles('truck4r').map((r) => r.label).join() === 'Eixo dianteiro,Eixo motriz,Eixo de apoio 1,Eixo de apoio 2' &&
+    !Spaces.validate(t4r).length]);
+  const s4r = Spaces.axleLoads(semi4, t4r, { weight: 20000, cgx: 8000, cgz: semi4.w / 2 });
+  const t4rRows = s4r.rows.filter((r) => r.part === 'tractor');
+  out.push(['1 + 3 tractor carries the kingpin on its 4 axles, the tridem sharing equally', t4rRows.length === 4 &&
+    Math.abs(t4rRows.reduce((t, r) => t + r.load, 0) - (s4r.kingpin.load + tareOf(t4r))) < 1 &&
+    Math.abs(t4rRows[1].cargo - t4rRows[2].cargo) < 1 && Math.abs(t4rRows[2].cargo - t4rRows[3].cargo) < 1]);
   const t84bad = JSON.parse(JSON.stringify(t84));
   t84bad.axles[1].dist = 200;
   out.push(['4-axle tractor: second steering axle must be ahead of the fifth wheel',
@@ -442,6 +474,131 @@ function spaceChecks() {
   out.push(['built-in 4-axle spaces are valid', ['bitruck', 'semi4ax', 'tractor84'].every((id) => Spaces.validate(Spaces.get(id)).length === 0)]);
 
   out.push(['container has no axles of its own', Spaces.axleLoads(Spaces.get('ct40'), null, { weight: 5000, cgx: 3000, cgz: 1000 }).rows.length === 0]);
+  return out;
+}
+
+/* The load plan (loadplan.js): every rule of the arranging, the statics model
+   it uses while placing, the checks after each delivery, and the search. */
+function planChecks() {
+  const out = [];
+  const P = window.SyncrofinLoadPlan;
+  const semi = Spaces.get('semi');
+  const t42 = Spaces.get('tractor42');
+  const EPS = 0.5;
+  const box = (o) => Object.assign({ id: 1, name: 'x', color: 'blue', dest: '', qty: 1 }, o);
+  const overlapsXZ = (a, b) => a.x < b.x + b.l - EPS && b.x < a.x + a.l - EPS && a.z < b.z + b.w - EPS && b.z < a.z + a.w - EPS;
+  const overlapsYZ = (a, b) => a.y < b.y + b.h - EPS && b.y < a.y + a.h - EPS && a.z < b.z + b.w - EPS && b.z < a.z + a.w - EPS;
+  const restsOn = (top, under) => Math.abs(under.y + under.h - top.y) <= 1 && overlapsXZ(top, under);
+
+  /* rotations */
+  out.push(['this side up: only turned about the vertical', P.orientations({ l: 1200, w: 800, h: 1450 }).every((o) => o.h === 1450) &&
+    P.orientations({ l: 1200, w: 800, h: 1450, orient: 'any' }).length === 6]);
+  const tall = P.planSync({ vehicle: semi, tractor: t42, items: [box({ l: 1200, w: 800, h: 1450, weight: 100, qty: 30 })] }, 0);
+  out.push(['upright boxes keep their height', tall.placed.length === 30 && tall.placed.every((b) => b.h === 1450)]);
+
+  /* fragile, weight on top, support */
+  const mix = P.planSync({ vehicle: semi, tractor: t42, rules: { support: 80 }, items: [
+    box({ id: 1, l: 600, w: 400, h: 400, weight: 30, qty: 30, fragile: true }),
+    box({ id: 2, l: 600, w: 600, h: 500, weight: 200, qty: 20, maxTop: 250 }),
+    box({ id: 3, l: 800, w: 600, h: 400, weight: 60, qty: 40 })
+  ] }, 0);
+  const onTopOf = (under) => mix.placed.filter((t) => t !== under && restsOn(t, under));
+  out.push(['nothing rests on a fragile box', mix.placed.filter((b) => b.fragile).every((b) => onTopOf(b).length === 0)]);
+  /* the weight resting on a box, all the way up, by the share of each layer */
+  const above = new Map();
+  [...mix.placed].sort((a, b) => b.y - a.y).forEach((b) => {
+    const load = (above.get(b) || 0) + b.weight;
+    const under = mix.placed.filter((u) => u !== b && restsOn(b, u));
+    const area = (u) => (Math.min(b.x + b.l, u.x + u.l) - Math.max(b.x, u.x)) * (Math.min(b.z + b.w, u.z + u.w) - Math.max(b.z, u.z));
+    const total = under.reduce((s, u) => s + area(u), 0);
+    under.forEach((u) => above.set(u, (above.get(u) || 0) + (load * area(u)) / total));
+  });
+  out.push(['no box bears more than its limit on top', mix.placed.filter((b) => b.maxTop !== Infinity).every((b) => (above.get(b) || 0) <= b.maxTop + 0.5) &&
+    mix.placed.some((b) => b.maxTop !== Infinity && (above.get(b) || 0) > 0)]);
+  out.push(['every stacked box has 80% of its base supported', mix.placed.filter((b) => b.y > 0.5).every((b) => {
+    const area = mix.placed.filter((u) => restsOn(b, u)).reduce((s, u) => s + (Math.min(b.x + b.l, u.x + u.l) - Math.max(b.x, u.x)) * (Math.min(b.z + b.w, u.z + u.w) - Math.max(b.z, u.z)), 0);
+    return area >= b.l * b.w * 0.8 - 0.5;
+  })]);
+
+  /* unloading order */
+  const drops = P.planSync({ vehicle: semi, tractor: t42, stops: ['A', 'B', 'C'], items: [
+    box({ id: 1, l: 1200, w: 800, h: 1000, weight: 300, qty: 9, dest: 'A' }),
+    box({ id: 2, l: 600, w: 400, h: 600, weight: 40, qty: 30, dest: 'B' }),
+    box({ id: 3, l: 1200, w: 1000, h: 900, weight: 250, qty: 8, dest: 'C' })
+  ] }, 0);
+  const blocked = drops.placed.some((first) => drops.placed.some((other) => other.stop > first.stop && (
+    (overlapsYZ(first, other) && other.x >= first.x + first.l - EPS) ||
+    (overlapsXZ(first, other) && other.y >= first.y + first.h - EPS))));
+  out.push(['no box is blocked by one delivered later', drops.placed.length === 47 && !blocked]);
+  out.push(['the first delivery sits by the doors', Math.max(...drops.placed.filter((b) => b.stop === 0).map((b) => b.x + b.l)) >
+    Math.max(...drops.placed.filter((b) => b.stop === 2).map((b) => b.x + b.l))]);
+
+  /* axle limits while placing: 24 t that would overload the tractor if loaded from the front */
+  const heavy = P.planSync({ vehicle: semi, tractor: t42, items: [box({ l: 1200, w: 1200, h: 900, weight: 2000, qty: 12 })] }, 0);
+  out.push(['heavy load placed within every axle limit', heavy.placed.length === 12 && !heavy.check.problems.some((p) => p.hard)]);
+  /* the linear statics model matches the full calculation */
+  const model = P.axleModel(semi, t42);
+  const cargo = { weight: 15000, cgx: 6200, cgz: semi.w / 2 };
+  const full = Spaces.axleLoads(semi, t42, cargo);
+  const lines = full.rows.filter((r) => r.max > 0).map((r) => r.load);
+  out.push(['axle model equals the statics', model.lines.slice(0, lines.length).every((L, i) =>
+    Math.abs(L.T + L.a * cargo.weight + L.b * cargo.weight * cargo.cgx - lines[i]) < 0.01)]);
+  /* too heavy for any position: left out with the reason */
+  /* 100 kg spare on the steering axle, 1 300 kg on the rear one: 1 500 kg fits nowhere */
+  const tight = JSON.parse(JSON.stringify(Spaces.get('rigid')));
+  tight.axles[0].max = 2700;
+  tight.axles[1].max = 3000;
+  const tooHeavy = P.planSync({ vehicle: tight, tractor: null, items: [box({ l: 1200, w: 800, h: 1000, weight: 1500, qty: 1 })] }, 0);
+  out.push(['a box that would overload an axle anywhere is left out as "eixo"', tooHeavy.unplaced.some((u) => u.reason === 'eixo') &&
+    !tooHeavy.check.problems.some((p) => p.hard)]);
+
+  /* shares kᵢ, group limit and gross weight */
+  const shared = JSON.parse(JSON.stringify(semi));
+  shared.axles[1].share = 40;
+  shared.axles[2].share = 30;
+  shared.axles[3].share = 30;
+  const sr = Spaces.axleLoads(shared, null, { weight: 20000, cgx: 8000, cgz: shared.w / 2 });
+  const rearCargo = sr.rows.filter((r) => r.part === 'space').map((r) => r.cargo);
+  const sum = rearCargo.reduce((a, b) => a + b, 0);
+  out.push(['unequal shares: 40/30/30 of the group', Math.abs(rearCargo[0] / sum - 0.4) < 1e-9 && Math.abs(rearCargo[1] / sum - 0.3) < 1e-9]);
+  const centre = 0.4 * 7985 + 0.3 * 9295 + 0.3 * 10605;
+  out.push(['group centre is Σ kᵢ·xᵢ', Math.abs(sr.kingpin.cargo - (20000 * (centre - 8000)) / (centre - 1675)) < 0.01]);
+  const badShares = JSON.parse(JSON.stringify(shared));
+  badShares.axles[3].share = 20;
+  out.push(['shares must add up to 100%', Spaces.validate(Spaces.clean(Object.assign(badShares, { name: 'x' }))).some((e) => e.field === 'axle1.share')]);
+  const over = Spaces.axleLoads(semi, t42, { weight: 24000, cgx: 9000, cgz: semi.w / 2 });
+  out.push(['group over its limit is reported', over.groups.some((g) => g.part === 'space' && g.max === 25500 && g.status === 'over')]);
+  const rigid = Spaces.get('rigid');
+  out.push(['gross weight from the cargo and every tare', Math.abs(Spaces.axleLoads(rigid, null, { weight: 3000, cgx: 3000, cgz: 1225 }).gross.load - (3000 + 2600 + 1700)) < 1e-9 &&
+    Spaces.axleLoads(rigid, null, { weight: 3000, cgx: 3000, cgz: 1225 }).gross.max === 7500]);
+  const atLimit = JSON.parse(JSON.stringify(rigid));
+  atLimit.axles[1].max = Spaces.axleLoads(rigid, null, { weight: 3000, cgx: 3000, cgz: 1225 }).rows[1].load;
+  out.push(['a load equal to its limit is not over (compared in grams)', Spaces.axleLoads(atLimit, null, { weight: 3000, cgx: 3000, cgz: 1225 }).rows[1].status !== 'over']);
+
+  /* the checker: after each delivery, lateral balance, least load on the steering and drive axles */
+  const at = (o) => Object.assign({ y: 0, z: 0, l: 1200, w: 1200, h: 1000, weight: 0, stop: 0 }, o);
+  const frontHeavy = [
+    at({ x: 0, z: 0, weight: 5000, stop: 1 }), at({ x: 0, z: 1200, weight: 5000, stop: 1 }),
+    at({ x: 12000, z: 0, weight: 6000, stop: 0 }), at({ x: 12000, z: 1200, weight: 6000, stop: 0 })
+  ];
+  const v1 = P.verify(semi, t42, frontHeavy, ['A', 'B'], null);
+  out.push(['fine as it leaves, overloaded after the first delivery', v1.states.length === 2 &&
+    !v1.states[0].problems.some((p) => p.hard) && v1.states[1].problems.some((p) => p.hard) &&
+    v1.problems.some((p) => p.state === 'Após a entrega 1 (A)')]);
+  const leaning = [at({ x: 6000, z: 0, weight: 8000 })];
+  out.push(['lateral imbalance reported', P.verify(semi, t42, leaning, [''], { lateral: 10 }).problems.some((p) => p.kind === 'lateral')]);
+  const tail = [at({ x: 6000, z: 625, weight: 3000 })];
+  out.push(['too little on the steering axle reported', P.verify(Spaces.get('rigid'), null, tail, [''], { minFront: 45 }).problems.some((p) => p.kind === 'minFront')]);
+  const nose = [at({ x: 0, z: 625, weight: 3000 })];
+  out.push(['too little on the drive axle reported', P.verify(Spaces.get('rigid'), null, nose, [''], { minDrive: 45 }).problems.some((p) => p.kind === 'minDrive')]);
+
+  /* the search: same list, same plan; the first plan comes back at once */
+  const demo = [box({ id: 1, l: 1200, w: 800, h: 1450, weight: 420, qty: 12, dest: 'X' }), box({ id: 2, l: 600, w: 400, h: 400, weight: 35, qty: 20, dest: 'Y', fragile: true })];
+  const a = P.planSync({ vehicle: semi, tractor: t42, items: demo }, 15);
+  const b = P.planSync({ vehicle: semi, tractor: t42, items: demo }, 15);
+  out.push(['the search is repeatable', JSON.stringify(a.placed.map((p) => [p.x, p.y, p.z])) === JSON.stringify(b.placed.map((p) => [p.x, p.y, p.z]))]);
+  const run = P.start({ vehicle: semi, tractor: t42, items: demo, rules: { budget: 1 } }, () => {});
+  out.push(['first plan at once, search stoppable', run.best.placed.length === 32 && run.running() && (run.cancel(), !run.running())]);
   return out;
 }
 
@@ -456,6 +613,11 @@ try {
   checks.push(...spaceChecks());
 } catch (err) {
   checks.push(['space checks ran: ' + (err && err.stack ? err.stack : err), false]);
+}
+try {
+  checks.push(...planChecks());
+} catch (err) {
+  checks.push(['load plan checks ran: ' + (err && err.stack ? err.stack : err), false]);
 }
 
 /* A plan saved before cargo spaces existed kept the vehicle as an index into
