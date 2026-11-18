@@ -92,7 +92,30 @@ O código está em `src/loadplan.js` (sem DOM). O problema é o carregamento de 
    - **Interrupção:** qualquer edição interrompe a busca e começa outra.
    - **Ajuste longitudinal:** se ainda sobrar um problema, a carga inteira pode recuar no baú. Sem problema, ela fica encostada na parede da frente.
 
-**Entregas.** Os destinos da lista são as paradas, na ordem mostrada ("Entrega 1, 2…"), que se muda com ↑ e ↓. A última entrega é carregada primeiro e vai para a frente. Ao empurrar volumes para trás por causa dos eixos, o sistema reserva no fundo o comprimento de que as entregas anteriores precisam. O painel de peso por eixo mostra a lista de problemas e uma tabela com o uso de cada eixo na saída e depois de cada entrega.
+**Modos de planejamento.** Em **Planejar a carga**, no painel à esquerda, você escolhe como o destino (cliente) de cada volume entra no plano. O modo fica salvo com o plano.
+
+- **Normal:** o destino é ignorado. Todos os volumes se misturam e o plano busca só o melhor aproveitamento de espaço e peso, dentro dos limites dos eixos e das regras do plano. Os eixos são verificados na saída.
+- **Por cliente:** a carga de cada cliente forma um bloco só, sem volume de outro cliente na frente dela (do lado das portas) nem em cima, em nenhum sentido. A ordem dos blocos não é fixa: a otimização testa ordens diferentes (a da lista, o cliente mais pesado na frente, o mais leve na frente e ordens sorteadas) e fica com a que melhor aproveita o espaço, o peso e os eixos. A lista mostra o bloco escolhido para cada cliente ("Bloco 1 (frente)", "Bloco 2"…). Os eixos são verificados na saída.
+- **Por itinerário** (padrão): segue a ordem de entrega descrita abaixo, com verificação dos eixos depois de cada entrega.
+
+**Ajuste manual.** Os botões **Automático** e **Manual** ficam na barra da vista, ao lado de 3D/Topo/Lado.
+
+- **Automático** (padrão): o planejador arruma a carga e busca planos melhores a cada mudança.
+- **Manual:** o plano fica como está e o operador move os volumes. Arraste um volume com o mouse (ou o dedo): uma prévia verde mostra onde ele vai ficar, ou vermelha quando não cabe (passaria do teto). Ao soltar, o volume desliza no piso, encosta numa parede ou num volume vizinho quando chega a menos de 6 cm e assenta pela gravidade, no piso ou sobre os volumes embaixo; o que estava em cima dele desce. Arrastar o fundo continua girando a vista.
+- **Teclado:** clique num volume (contorno âmbar) e use as setas para movê-lo 100 mm (10 mm com Shift) e **R** para girá-lo 90°. Esc tira a seleção.
+- **Regras:** posições feitas à mão nunca deixam volumes sobrepostos ou fora do baú, mas o que quebra uma regra do plano é mostrado como aviso, e não recusado: base pouco apoiada, carga sobre um frágil, peso acima do limite "em cima", volume no caminho de uma entrega anterior ou misturado com o bloco de outro cliente. Os eixos são recalculados a cada movimento.
+- **Lista no modo manual:** ao acrescentar ou tirar itens, trocar o veículo ou as regras, os volumes já posicionados ficam onde estão e os que faltam são encaixados no espaço livre em volta deles. **Carregar** faz o mesmo com os volumes que ficaram de fora.
+- Voltar ao **Automático** refaz o plano (com confirmação se houve ajustes). O modo e as posições manuais ficam salvos com o plano. O ajuste manual usa a vista 3D (WebGL).
+
+**Ordem de carregamento (PDF).** O botão **Ordem de carregamento (PDF)**, ao lado de Relatório, gera um documento para quem carrega o veículo e o abre numa nova aba, pronto para imprimir ou salvar. Se o navegador bloquear a aba, o arquivo é baixado.
+
+- **Sequência:** sempre do **fundo** (a parede junto à cabine) para as **portas**. Um volume só entra depois dos volumes que ficam embaixo dele; entre os liberados vai primeiro o mais ao fundo, depois o mais baixo, depois o da esquerda. A sequência é dividida em etapas de cerca de 1,25 m do comprimento (no máximo 12 volumes por etapa).
+- **Capa:** veículo, data, a regra de carregamento, totais (volumes, peso, m³, comprimento usado, etapas, modo de planejamento), imagem 3D da carga completa, carga por eixo na saída e os avisos do plano (inclusive volumes que ficaram de fora).
+- **Cada etapa:** imagem 3D vista das portas, com o que já foi carregado e os volumes da etapa destacados em laranja; planta (de cima) e vista lateral em escala, com os já carregados em cinza e os da etapa coloridos e numerados; tabela com nº, volume, cliente, medidas, peso, distância do fundo, altura, lado (esquerdo, centro, direito) e observações (girado, deitado, frágil, não empilhar).
+- No fim, campos de assinatura para o responsável pelo carregamento e o conferente; todas as páginas trazem "Página X de N".
+- O PDF é gerado no próprio navegador por `src/pdfwriter.js` (sem bibliotecas), e o documento é montado por `src/loaddoc.js`. Sem WebGL, o documento sai sem as imagens 3D, com as plantas, as vistas laterais e as tabelas.
+
+**Entregas (modo por itinerário).** Os destinos da lista são as paradas, na ordem mostrada ("Entrega 1, 2…"), que se muda com ↑ e ↓. A última entrega é carregada primeiro e vai para a frente. Ao empurrar volumes para trás por causa dos eixos, o sistema reserva no fundo o comprimento de que as entregas anteriores precisam. O painel de peso por eixo mostra a lista de problemas e uma tabela com o uso de cada eixo na saída e depois de cada entrega.
 
 **Regras do plano.** Ficam no painel à esquerda: apoio mínimo, desbalanceamento lateral máximo, carga mínima no eixo dianteiro e no de tração, e tempo de otimização. Cada volume tem as suas regras no formulário: posição (em pé ou deitar), peso máximo em cima (vazio = sem limite, 0 = não empilhar) e frágil.
 
@@ -101,6 +124,7 @@ O código está em `src/loadplan.js` (sem DOM). O problema é o carregamento de 
 O botão **Importar planilha** lê um arquivo Excel (`.xlsx`) ou CSV e acrescenta os volumes à lista. O link **Baixar modelo CSV**, abaixo do formulário, baixa um modelo pronto.
 
 - **Colunas:** são reconhecidas pelo cabeçalho, com ou sem acentos e em português ou inglês: Descrição, Comprimento, Largura, Altura, Peso, Quantidade, Destino e Cor, e, se quiser, Pode deitar (Sim/Não), Frágil (Sim/Não) e Peso máx. em cima (kg). Sem cabeçalho, a ordem esperada é essa mesma.
+- **Cores:** 22 cores — Azul, Amarelo, Verde, Laranja, Cinza, Vermelho, Rosa, Roxo, Lilás, Azul-escuro, Verde-água, Ciano, Verde-limão, Verde-escuro, Oliva, Marrom, Bege, Salmão, Dourado, Vinho, Grafite e Branco (também em inglês e variações como "azul marinho", "turquesa", "bordô", "preto"). Linhas sem cor recebem as cores em sequência. Nas caixas de cor escura, o nome é impresso em branco.
 - **Unidades:** as medidas são em mm, a menos que o cabeçalho diga `(cm)` ou `(m)`. O peso é em kg por unidade; um cabeçalho "Peso total" é dividido pela quantidade.
 - **CSV:** aceita `;`, `,` ou tab como separador, vírgula decimal e arquivos em UTF-8 ou Windows-1252, que é como o Excel salva no Brasil.
 - **Excel:** só a primeira aba é lida. Arquivos `.xls` antigos não são suportados: salve como `.xlsx` ou `.csv`.

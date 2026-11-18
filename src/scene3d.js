@@ -236,8 +236,10 @@ function boxFace(hex, name, wmm, hmm, side) {
   g.lineWidth = edge;
   g.strokeRect(edge / 2, edge / 2, W - edge, H - edge);
 
-  /* label */
-  const ink = 'rgba(22,24,26,0.85)';
+  /* label: dark print, light on a dark box */
+  const rgb = [1, 3, 5].map((i) => parseInt(String(hex).slice(i, i + 2), 16) / 255);
+  const lum = 0.2126 * rgb[0] + 0.7152 * rgb[1] + 0.0722 * rgb[2];
+  const ink = lum < 0.42 ? 'rgba(255,255,255,0.92)' : 'rgba(22,24,26,0.85)';
   const pad = Math.max(4, Math.min(W, H) * 0.08);
   const markS = side === 'side' && Math.min(W, H) > 70 ? Math.min(W, H) * 0.17 : 0;
   if (markS) upMark(g, W - pad - markS, pad, markS, ink);
@@ -1168,6 +1170,8 @@ function update(data) {
   const maxX = v.maxX;
 
   boxGroups = addCargo(world, data, deck);
+  deckY = deck;
+  ghost(null);
 
   scene.add(world);
 
@@ -1246,7 +1250,7 @@ function addCargo(world, data, deck) {
     mesh.castShadow = true;
     mesh.receiveShadow = true;
     world.add(mesh);
-    boxGroups.push({ id: g.id, materials });
+    boxGroups.push({ id: g.id, materials, mesh, boxes: g.boxes });
   });
   if (edgePos.length) {
     const eg = new THREE.BufferGeometry();
@@ -1322,6 +1326,69 @@ function render(view, selected) {
   camera.far = dist + radius * 3;
   camera.updateProjectionMatrix();
   renderer.render(scene, camera);
+}
+
+/* ------------------------------------------------------- manual editing --- */
+/* The planner's manual mode moves boxes with the pointer. pick() finds the
+   box under it (the planner's own box object), floorPoint() where the
+   pointer meets a level plane at a height above the floor (planner mm), and
+   ghost() shows a box at a planner position: 'ok' (green, it fits), 'bad'
+   (red) or 'mark' (amber outline, the box chosen for the keyboard). */
+let deckY = 0;
+let ghostObj = null;
+const raycaster = new THREE.Raycaster();
+
+function pointerNdc(clientX, clientY) {
+  const r = host.getBoundingClientRect();
+  return new THREE.Vector2(((clientX - r.left) / r.width) * 2 - 1, -((clientY - r.top) / r.height) * 2 + 1);
+}
+
+function pick(clientX, clientY) {
+  if (!renderer || !camera || !host || !boxGroups.length) return null;
+  raycaster.setFromCamera(pointerNdc(clientX, clientY), camera);
+  const hits = raycaster.intersectObjects(boxGroups.map((g) => g.mesh), false);
+  for (const hit of hits) {
+    if (hit.instanceId === undefined) continue;
+    const g = boxGroups.find((b) => b.mesh === hit.object);
+    if (g && g.boxes[hit.instanceId]) return g.boxes[hit.instanceId];
+  }
+  return null;
+}
+
+function floorPoint(clientX, clientY, heightMm) {
+  if (!renderer || !camera || !host) return null;
+  raycaster.setFromCamera(pointerNdc(clientX, clientY), camera);
+  const plane = new THREE.Plane(new THREE.Vector3(0, 1, 0), -(deckY + (heightMm || 0) * MM));
+  const p = new THREE.Vector3();
+  if (!raycaster.ray.intersectPlane(plane, p)) return null;
+  return { x: p.x / MM, z: -p.z / MM };
+}
+
+function ghost(b, look) {
+  if (ghostObj) {
+    if (scene) scene.remove(ghostObj);
+    ghostObj.traverse((o) => {
+      if (o.geometry) o.geometry.dispose();
+      if (o.material) o.material.dispose();
+    });
+    ghostObj = null;
+  }
+  if (!b || !scene) return;
+  /* vivid, so it stands out even over boxes of the same colour */
+  const colour = look === 'bad' ? 0xe02424 : look === 'mark' ? 0xf0a000 : 0x00c853;
+  const g = new THREE.Group();
+  /* a hair larger than the box, so its outline is not hidden by it */
+  const geo = new THREE.BoxGeometry(b.l * MM + 0.012, b.h * MM + 0.012, b.w * MM + 0.012);
+  if (look !== 'mark') {
+    g.add(new THREE.Mesh(geo, new THREE.MeshBasicMaterial({ color: colour, transparent: true, opacity: 0.55, depthWrite: false })));
+  }
+  const edges = new THREE.LineSegments(new THREE.EdgesGeometry(geo),
+    new THREE.LineBasicMaterial({ color: look === 'mark' ? colour : look === 'bad' ? 0x5a0b0b : 0x0b3d1c, depthTest: look !== 'mark' }));
+  edges.renderOrder = 2;
+  g.add(edges);
+  g.position.copy(toWorld(b.x + b.l / 2, b.y + b.h / 2, b.z + b.w / 2, deckY));
+  ghostObj = g;
+  scene.add(g);
 }
 
 /* ------------------------------------------------------------- side view --- */
@@ -1418,7 +1485,120 @@ function side(space, maxW, maxH, opts) {
   };
 }
 
-const api = { active: false, attach, update, render, side };
+/* ------------------------------------------------------------- snapshots --- */
+/* Pictures for the loading-order document: the vehicle with its body cut
+   open, the boxes loaded so far, the boxes of the current step marked in
+   amber. Its own renderer, white background (the picture goes into a PDF
+   as a JPEG).
+   o: { space, tractor, placed, names, palette, mark: [boxes], width, height,
+        whole (frame the whole vehicle, not just the cargo space),
+        az, elev (the angles of the planner's view; default: from behind on
+        the left, looking into the cargo space towards the far end) }
+   Returns { url (JPEG data URL), width, height } or null. */
+let snapKit = null;
+
+function snapRenderer() {
+  if (snapKit) return snapKit;
+  const canvas = document.createElement('canvas');
+  const r = new THREE.WebGLRenderer({ canvas, antialias: true, alpha: false, preserveDrawingBuffer: true });
+  r.outputColorSpace = THREE.SRGBColorSpace;
+  r.setClearColor(0xffffff, 1);
+  const sc = new THREE.Scene();
+  sc.add(new THREE.HemisphereLight(0xffffff, 0x9aa1a8, 2.1));
+  const light = new THREE.DirectionalLight(0xffffff, 2.0);
+  light.position.set(25, 30, 22);
+  sc.add(light);
+  snapKit = { r, scene: sc, env: makeStudio(r), cam: new THREE.PerspectiveCamera(30, 1, 0.1, 600) };
+  return snapKit;
+}
+
+function snapshot(o) {
+  if (!renderer || !o || !o.space) return null;
+  let kit;
+  try {
+    kit = snapRenderer();
+  } catch (e) {
+    return null;
+  }
+  const group = new THREE.Group();
+  const mainStudio = studio;
+  studio = kit.env;
+  let v;
+  try {
+    v = buildVehicle(group, o.space, o.tractor || null, { closed: false });
+    addCargo(group, { placed: o.placed || [], names: o.names, palette: o.palette }, v.deck);
+  } finally {
+    studio = mainStudio;
+  }
+  /* the boxes of this step */
+  (o.mark || []).forEach((b) => {
+    const geo = new THREE.BoxGeometry(b.l * MM + 0.02, b.h * MM + 0.02, b.w * MM + 0.02);
+    const c = toWorld(b.x + b.l / 2, b.y + b.h / 2, b.z + b.w / 2, v.deck);
+    const fill = new THREE.Mesh(geo, new THREE.MeshBasicMaterial({ color: 0xffa000, transparent: true, opacity: 0.3, depthWrite: false }));
+    fill.position.copy(c);
+    group.add(fill);
+    const edges = new THREE.LineSegments(new THREE.EdgesGeometry(geo), new THREE.LineBasicMaterial({ color: 0xe65100 }));
+    edges.position.copy(c);
+    group.add(edges);
+  });
+
+  const w = Math.max(16, Math.round(o.width || 800));
+  const h = Math.max(16, Math.round(o.height || 450));
+  kit.r.setPixelRatio(1);
+  kit.r.setSize(w, h, false);
+
+  const L = o.space.l * MM;
+  const H = o.space.h * MM;
+  const W = o.space.w * MM;
+  /* the whole vehicle, or the cargo space up to frameTo mm from the far end */
+  const reach = o.frameTo > 0 ? Math.min(L, o.frameTo * MM) : L;
+  const frame = o.whole || !(L > 0)
+    ? new THREE.Box3().setFromObject(group)
+    : new THREE.Box3(new THREE.Vector3(0, v.deck, -W), new THREE.Vector3(reach, v.deck + H, 0));
+  const centre = frame.getCenter(new THREE.Vector3());
+  const az = typeof o.az === 'number' ? o.az : -0.72;
+  const elev = typeof o.elev === 'number' ? o.elev : 0.5;
+  const dir = new THREE.Vector3(Math.cos(elev) * Math.cos(az), Math.sin(elev), -Math.cos(elev) * Math.sin(az)).normalize();
+  const cam = kit.cam;
+  cam.aspect = w / h;
+  cam.up.set(0, 1, 0);
+  cam.position.copy(centre).addScaledVector(dir, 10);
+  cam.lookAt(centre);
+  cam.updateMatrixWorld();
+  /* the nearest distance that keeps every corner of the frame in view */
+  const tanV = Math.tan((cam.fov * Math.PI) / 360) * 0.92;
+  const tanH = tanV * cam.aspect;
+  const right = new THREE.Vector3().setFromMatrixColumn(cam.matrixWorld, 0);
+  const up = new THREE.Vector3().setFromMatrixColumn(cam.matrixWorld, 1);
+  let fit = 0;
+  for (let i = 0; i < 8; i++) {
+    const p = new THREE.Vector3(i & 1 ? frame.max.x : frame.min.x, i & 2 ? frame.max.y : frame.min.y, i & 4 ? frame.max.z : frame.min.z).sub(centre);
+    const toward = p.dot(dir);
+    fit = Math.max(fit, toward + Math.abs(p.dot(right)) / tanH, toward + Math.abs(p.dot(up)) / tanV);
+  }
+  const radius = frame.max.clone().sub(frame.min).length() / 2;
+  cam.position.copy(centre).addScaledVector(dir, fit);
+  cam.lookAt(centre);
+  cam.near = Math.max(0.05, fit - radius * 3);
+  cam.far = fit + radius * 4 + 40;
+  cam.updateProjectionMatrix();
+
+  kit.scene.add(group);
+  kit.r.render(kit.scene, cam);
+  const url = kit.r.domElement.toDataURL('image/jpeg', 0.9);
+  kit.scene.remove(group);
+  group.traverse((obj) => {
+    if (obj.geometry) obj.geometry.dispose();
+    const ms = obj.material ? (Array.isArray(obj.material) ? obj.material : [obj.material]) : [];
+    ms.forEach((m) => {
+      if (m.map && !isCached(m.map)) m.map.dispose();
+      m.dispose();
+    });
+  });
+  return { url, width: w, height: h };
+}
+
+const api = { active: false, attach, update, render, side, pick, floorPoint, ghost, snapshot };
 window.SyncrofinScene = api;
 
 function boot() {

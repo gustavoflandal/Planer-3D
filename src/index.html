@@ -85,10 +85,6 @@
           <label for="f-color">Cor</label>
           <select id="f-color" name="color">
             <option value="blue">Azul</option>
-            <option value="yellow">Amarelo</option>
-            <option value="green">Verde</option>
-            <option value="orange">Laranja</option>
-            <option value="grey">Cinza</option>
           </select>
         </div>
       </div>
@@ -136,9 +132,19 @@
         em cima (vazio = sem limite, 0 = não empilhar) e se é frágil (nada vai em cima dele).
         O lateral conta a partir de 50/50 (10% = até 60% de um lado). A carga mínima no dianteiro é a parte do peso do
         caminhão (ou do cavalo) sobre os eixos da frente; a do eixo de tração, a parte do peso bruto total.
-        Os destinos da lista são as entregas, na ordem mostrada: a última entrega vai para a frente do baú.
+        Os destinos da lista são usados conforme o modo de planejamento escolhido abaixo.
       </p>
     </details>
+
+    <fieldset class="plan-mode" id="plan-mode">
+      <legend>Planejar a carga</legend>
+      <div class="mode-seg" role="radiogroup" aria-label="Modo de planejamento">
+        <label><input type="radio" name="plan-mode" value="normal"><span>Normal</span></label>
+        <label><input type="radio" name="plan-mode" value="cliente"><span>Por cliente</span></label>
+        <label><input type="radio" name="plan-mode" value="itinerario"><span>Por itinerário</span></label>
+      </div>
+      <p class="mode-help" id="mode-help"></p>
+    </fieldset>
 
     <ul class="items" id="items"></ul>
     <p class="empty" id="empty" hidden>
@@ -154,6 +160,11 @@
         <button type="button" data-view="side" aria-pressed="false">Lado</button>
         <button type="button" data-view="left" aria-pressed="false">Esq.</button>
         <button type="button" data-view="right" aria-pressed="false">Dir.</button>
+      </nav>
+
+      <nav class="seg control-seg" aria-label="Ajuste da carga">
+        <button type="button" data-control="auto" class="on" aria-pressed="true" title="O planejador arruma a carga">Automático</button>
+        <button type="button" data-control="manual" aria-pressed="false" title="Mova os volumes arrastando com o mouse">Manual</button>
       </nav>
 
       <div class="gauges">
@@ -212,7 +223,10 @@
     <div class="stage-foot">
       <span id="status">Pronto.</span>
       <span id="vehicle-dims"></span>
-      <button class="btn line small" id="report" type="button">Relatório</button>
+      <span class="foot-actions">
+        <button class="btn primary small" id="load-order" type="button" title="Documento em PDF com a sequência de carregamento, do fundo para as portas">Ordem de carregamento (PDF)</button>
+        <button class="btn line small" id="report" type="button">Relatório</button>
+      </span>
     </div>
 
     <div class="axle-panel" aria-label="Distribuição de peso por eixo">
@@ -302,6 +316,8 @@
 <script src="assets/loadplan.js"></script>
 <script src="assets/app.js"></script>
 <script src="assets/spaces-ui.js"></script>
+<script src="assets/pdfwriter.js"></script>
+<script src="assets/loaddoc.js"></script>
 <script type="module" src="assets/scene3d.js"></script>
 </body>
 </html>

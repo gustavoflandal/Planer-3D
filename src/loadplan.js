@@ -87,11 +87,32 @@
     return out;
   }
 
-  /* One entry per physical box. */
-  function expand(items, stops) {
+  /* ----------------------------------------------------------------- modes --- */
+  /* How the destinations shape the plan:
+     normal      the destination is ignored: every box may go anywhere, the
+                 plan only seeks space, weight and the axle limits;
+     cliente     each client's boxes form one block of their own (nothing of
+                 another client in front of it towards the doors or on top
+                 of it), and the search also chooses the order of the blocks
+                 along the vehicle;
+     itinerario  the blocks follow the delivery order (the last delivery at
+                 the front, the first at the doors) and the axles are checked
+                 again after every delivery. */
+  var MODES = ['normal', 'cliente', 'itinerario'];
+  var DEFAULT_MODE = 'itinerario';
+
+  function cleanMode(m) {
+    return MODES.indexOf(m) >= 0 ? m : DEFAULT_MODE;
+  }
+
+  /* One entry per physical box. client: the index of its destination in
+     stops; stop: the block it is loaded in (0 = at the doors), which the
+     mode sets. */
+  function expand(items, stops, mode) {
     var queue = [];
     items.forEach(function (it) {
-      var stop = Math.max(0, stops.indexOf(it.dest || ''));
+      var client = Math.max(0, stops.indexOf(it.dest || ''));
+      var stop = mode === 'normal' ? 0 : client;
       for (var i = 0; i < it.qty; i++) {
         queue.push({
           id: it.id,
@@ -104,6 +125,7 @@
           orient: it.orient === 'any' ? 'any' : 'upright',
           fragile: !!it.fragile,
           maxTop: has(it.maxTop) && it.maxTop >= 0 ? it.maxTop : Infinity,
+          client: client,
           stop: stop
         });
       }
@@ -237,8 +259,9 @@
   }
 
   /* Unloading order: the doors are at the back (x = length). A box must not
-     sit between a box delivered earlier and the doors, nor on top of it. */
-  function blocks(box, stop, placed) {
+     sit between a box delivered earlier and the doors, nor on top of it.
+     strict (by client): no stack of two blocks at all, either way up. */
+  function blocks(box, stop, placed, strict) {
     for (var i = 0; i < placed.length; i++) {
       var p = placed[i];
       if (p.stop === stop) continue;
@@ -250,6 +273,7 @@
       var other = first === p ? box : p;
       if (yOver && other.x >= first.x + first.l - EPS) return true;
       if (xOver && other.y >= first.y + first.h - EPS) return true;
+      if (strict && xOver && first.y >= other.y + other.h - EPS) return true;
     }
     return false;
   }
@@ -323,7 +347,7 @@
      where an unplaced box says why: peso (payload), eixo (no position left
      that keeps every axle within its limit), regras (stacking or unloading
      order) or espaco (no room). */
-  function construct(ctx, queue) {
+  function construct(ctx, queue, fixed) {
     var V = ctx.vehicle;
     var need = ctx.rules.support / 100;
     var placed = [];
@@ -332,6 +356,15 @@
     var M = 0; /* moment about the front wall (kg·mm) */
     var Mz = 0; /* moment about the left wall (kg·mm) */
     var spaces = [{ x: 0, y: 0, z: 0, l: V.l, w: V.w, h: V.h }];
+    /* boxes the operator put by hand stay where they are; the rest goes
+       around them */
+    (fixed || []).forEach(function (b) {
+      placed.push(b);
+      W += b.weight;
+      M += b.weight * (b.x + b.l / 2);
+      Mz += b.weight * (b.z + b.w / 2);
+      spaces = recut(spaces, b);
+    });
 
     /* Length to keep free at the back for the deliveries that come off
        before stop s: the floor their boxes need (a box's base divided by
@@ -399,7 +432,7 @@
             why.rules = true;
             continue;
           }
-          if (blocks(box, it.stop, placed)) {
+          if (blocks(box, it.stop, placed, ctx.mode === 'cliente')) {
             why.rules = true;
             continue;
           }
@@ -424,6 +457,7 @@
       b.color = it.color;
       b.weight = it.weight;
       b.stop = it.stop;
+      b.client = it.client;
       b.fragile = it.fragile;
       b.maxTop = it.maxTop;
       b.above = 0;
@@ -616,7 +650,7 @@
     var best = { placed: placed, check: check, shift: 0 };
     for (var dx = step; dx <= room + 0.5; dx += step) {
       var moved = shifted(placed, Math.min(dx, room));
-      var c = verify(ctx.vehicle, ctx.tractor, moved, ctx.stops, ctx.rules);
+      var c = verify(ctx.vehicle, ctx.tractor, moved, ctx.verifyStops, ctx.rules);
       if (c.penalty < best.check.penalty - 1e-9) {
         best = { placed: moved, check: c, shift: Math.min(dx, room) };
         if (c.penalty <= 0) break;
@@ -700,9 +734,17 @@
     });
   }
 
-  function attempt(ctx, order) {
-    var r = construct(ctx, order);
-    var check = verify(ctx.vehicle, ctx.tractor, r.placed, ctx.stops, ctx.rules);
+  /* One construction. perm (mode cliente): the block of each client, perm[c]
+     for client c, 0 at the doors; the boxes take it before they are put in
+     order, since the order is by block. */
+  function attempt(ctx, keyName, rand, noise, perm) {
+    if (perm) {
+      ctx.queue.forEach(function (it) {
+        it.stop = perm[it.client];
+      });
+    }
+    var r = construct(ctx, ordered(ctx.queue, keyName, rand, noise));
+    var check = verify(ctx.vehicle, ctx.tractor, r.placed, ctx.verifyStops, ctx.rules);
     var adj = slide(ctx, r.placed, check);
     var totals = summarize(adj.placed, r.unplaced);
     return {
@@ -711,7 +753,8 @@
       totals: totals,
       check: adj.check,
       shift: adj.shift,
-      score: scoreOf(totals, adj.check)
+      score: scoreOf(totals, adj.check),
+      perm: perm || null
     };
   }
 
@@ -721,35 +764,451 @@
 
   function context(input) {
     var rules = cleanRules(input.rules);
+    var mode = cleanMode(input.mode);
     var stops = input.stops || stopOrder(input.items || [], []);
     return {
       vehicle: input.vehicle,
       tractor: input.tractor || null,
       rules: rules,
+      mode: mode,
       stops: stops,
+      /* only an itinerary has deliveries to check the axles after */
+      verifyStops: mode === 'itinerario' ? stops : [],
       model: axleModel(input.vehicle, input.tractor || null),
-      queue: expand(input.items || [], stops)
+      queue: expand(input.items || [], stops, mode)
     };
   }
 
+  /* Mode cliente: the client blocks to start from — the list order, the
+     heaviest client at the front, the lightest at the front. A perm gives
+     the block of each client (0 at the doors, the highest at the front). */
+  function clientPerms(ctx) {
+    var n = ctx.stops.length;
+    if (n < 2) return [null];
+    var weight = [];
+    for (var c = 0; c < n; c++) weight.push(0);
+    ctx.queue.forEach(function (it) {
+      weight[it.client] += it.weight;
+    });
+    function fromFrontOrder(front) {
+      /* front: clients from the front wall back to the doors */
+      var perm = [];
+      front.forEach(function (c, i) {
+        perm[c] = n - 1 - i;
+      });
+      return perm;
+    }
+    var idx = [];
+    for (var i = 0; i < n; i++) idx.push(i);
+    var heavy = idx.slice().sort(function (a, b) {
+      return weight[b] - weight[a] || a - b;
+    });
+    return [fromFrontOrder(idx), fromFrontOrder(heavy), fromFrontOrder(heavy.slice().reverse())];
+  }
+
   /* The first plan, at once: three deterministic orders (one for a very
-     large list), the best kept. */
+     large list), the best kept; by client, also three block orders. */
   function firstPlan(ctx) {
     var keys = ctx.queue.length > 150 ? ['volume'] : ['volume', 'longest', 'weight'];
+    var perms = ctx.mode === 'cliente' ? clientPerms(ctx) : [null];
     var best = null;
-    keys.forEach(function (k) {
-      var r = attempt(ctx, ordered(ctx.queue, k));
-      r.tries = 1;
-      if (better(r, best)) best = r;
+    perms.forEach(function (perm, pi) {
+      (pi === 0 ? keys : keys.slice(0, 1)).forEach(function (k) {
+        var r = attempt(ctx, k, null, 0, perm);
+        r.tries = 1;
+        if (better(r, best)) best = r;
+      });
     });
     return best;
   }
 
-  function randomTry(ctx, rand) {
+  /* A random run; by client it also tries another block order: a shuffle,
+     or the best one so far with two blocks swapped. */
+  function randomTry(ctx, rand, best) {
     var names = Object.keys(KEYS);
     var key = names[Math.floor(rand() * names.length)];
     var noise = 0.15 + rand() * 0.6;
-    return attempt(ctx, ordered(ctx.queue, key, rand, noise));
+    var perm = null;
+    if (ctx.mode === 'cliente' && ctx.stops.length > 1) {
+      var n = ctx.stops.length;
+      perm = best && best.perm && rand() < 0.6 ? best.perm.slice() : null;
+      if (perm) {
+        var a = Math.floor(rand() * n);
+        var b = Math.floor(rand() * n);
+        var ia = perm.indexOf(a);
+        var ib = perm.indexOf(b);
+        perm[ia] = b;
+        perm[ib] = a;
+      } else {
+        perm = [];
+        for (var i = 0; i < n; i++) perm.push(i);
+        for (var j = n - 1; j > 0; j--) {
+          var k = Math.floor(rand() * (j + 1));
+          var t = perm[j];
+          perm[j] = perm[k];
+          perm[k] = t;
+        }
+      }
+    }
+    return attempt(ctx, key, rand, noise, perm);
+  }
+
+  /* What the page needs besides the boxes: the mode, the destinations and,
+     by client, the blocks from the front wall to the doors. */
+  function finish(r, ctx) {
+    r.mode = ctx.mode;
+    r.stops = ctx.stops;
+    r.rules = ctx.rules;
+    r.blocks = null;
+    if (ctx.mode === 'cliente') {
+      /* where each client's block really starts, front first (by hand the
+         operator may have changed the order the search chose) */
+      var front = {};
+      r.placed.forEach(function (b) {
+        front[b.client] = Math.min(front[b.client] === undefined ? Infinity : front[b.client], b.x);
+      });
+      r.blocks = Object.keys(front)
+        .map(Number)
+        .sort(function (a, b) {
+          return front[a] - front[b] || a - b;
+        })
+        .map(function (c) {
+          return ctx.stops[c];
+        });
+    }
+    return r;
+  }
+
+  /* --------------------------------------------------------- loading order --- */
+  /* The order to put the boxes in, always from the far end of the cargo
+     space (the front wall, x = 0) towards the doors: a box goes in only after
+     every box it rests on; among the boxes free to go, the deepest one, then
+     the lowest, then the one on the left. The order is cut into steps — a
+     section of the load about `bay` mm long, or `max` boxes at most.
+     Returns { order: [index into placed], steps: [{ boxes: [index], from, to }] }. */
+  function loadingSteps(placed, opts) {
+    opts = opts || {};
+    var bay = opts.bay || 1250;
+    var max = opts.max || 12;
+    var n = placed.length;
+    var waiting = [];
+    var carries = [];
+    for (var i = 0; i < n; i++) {
+      waiting.push(0);
+      carries.push([]);
+    }
+    for (var a = 0; a < n; a++) {
+      for (var b = 0; b < n; b++) {
+        if (a === b) continue;
+        var lo = placed[b];
+        var hi = placed[a];
+        if (Math.abs(lo.y + lo.h - hi.y) <= 1 && footprintOver(hi, lo)) {
+          waiting[a]++; /* a rests on b */
+          carries[b].push(a);
+        }
+      }
+    }
+    var done = [];
+    var order = [];
+    function before(p, q) {
+      var dx = Math.round(p.x / 10) - Math.round(q.x / 10);
+      if (dx) return dx < 0;
+      if (Math.abs(p.y - q.y) > 1) return p.y < q.y;
+      return p.z < q.z;
+    }
+    while (order.length < n) {
+      var best = -1;
+      for (var k = 0; k < n; k++) {
+        if (done[k] || waiting[k] > 0) continue;
+        if (best < 0 || before(placed[k], placed[best])) best = k;
+      }
+      if (best < 0) {
+        /* cannot happen with boxes at rest; take the deepest left anyway */
+        for (var m = 0; m < n; m++) {
+          if (!done[m] && (best < 0 || before(placed[m], placed[best]))) best = m;
+        }
+      }
+      done[best] = true;
+      order.push(best);
+      carries[best].forEach(function (c) {
+        waiting[c]--;
+      });
+    }
+    var steps = [];
+    var cur = null;
+    order.forEach(function (idx) {
+      var b = placed[idx];
+      if (!cur || b.x - cur.x0 >= bay || cur.boxes.length >= max) {
+        cur = { boxes: [], x0: b.x, from: b.x, to: b.x + b.l };
+        steps.push(cur);
+      }
+      cur.boxes.push(idx);
+      cur.from = Math.min(cur.from, b.x);
+      cur.to = Math.max(cur.to, b.x + b.l);
+    });
+    steps.forEach(function (s) {
+      delete s.x0;
+    });
+    return { order: order, steps: steps };
+  }
+
+  /* ------------------------------------------------------- manual editing --- */
+  /* The operator moves boxes by hand. These keep the plan physical — every
+     box inside the cargo space, resting on the floor or on boxes, nothing
+     overlapping — and report the rules a hand-made position breaks (base
+     support, stacking, unloading order) as problems instead of refusing it. */
+
+  /* a box without its links to the boxes under it */
+  function bare(b) {
+    return {
+      id: b.id, name: b.name, color: b.color, weight: b.weight || 0,
+      x: b.x, y: b.y, z: b.z, l: b.l, w: b.w, h: b.h,
+      stop: b.stop || 0, client: b.client || 0,
+      fragile: !!b.fragile, maxTop: has(b.maxTop) ? b.maxTop : Infinity
+    };
+  }
+
+  function footprintOver(a, b) {
+    return a.x < b.x + b.l - EPS && b.x < a.x + a.l - EPS && a.z < b.z + b.w - EPS && b.z < a.z + a.w - EPS;
+  }
+
+  /* where a box let go over this footprint comes to rest: on the highest
+     top under it, or on the floor */
+  function restingY(box, others) {
+    var y = 0;
+    others.forEach(function (p) {
+      if (footprintOver(box, p)) y = Math.max(y, p.y + p.h);
+    });
+    return y;
+  }
+
+  /* The boxes that rest on box i, and on those, all the way up: they ride
+     along (or fall) when it moves. */
+  function riders(placed, i) {
+    var out = [placed[i]];
+    for (var k = 0; k < out.length; k++) {
+      var base = out[k];
+      placed.forEach(function (p) {
+        if (out.indexOf(p) < 0 && Math.abs(p.y - (base.y + base.h)) <= 1 && footprintOver(p, base)) out.push(p);
+      });
+    }
+    return out.slice(1);
+  }
+
+  /* Gravity for the whole load: from the bottom up, each box drops onto
+     what is under it. Copies, in the same order. */
+  function settle(placed) {
+    var copies = placed.map(bare);
+    var order = copies.map(function (b, i) {
+      return i;
+    }).sort(function (a, b) {
+      return copies[a].y - copies[b].y || a - b;
+    });
+    var done = [];
+    order.forEach(function (i) {
+      copies[i].y = restingY(copies[i], done);
+      done.push(copies[i]);
+    });
+    return copies;
+  }
+
+  /* Rebuilds what rests on what (and the weight each box bears) for a load
+     put together by hand. Returns, per box, the share of its base held. */
+  function relate(placed) {
+    var order = placed.map(function (b, i) {
+      return i;
+    }).sort(function (a, b) {
+      return placed[a].y - placed[b].y || a - b;
+    });
+    var held = [];
+    var below = [];
+    placed.forEach(function (b) {
+      b.above = 0;
+      b.below = [];
+    });
+    order.forEach(function (i) {
+      var b = placed[i];
+      var sup = supporters(b, below);
+      held[i] = Math.min(1, sup.area / (b.l * b.w || 1));
+      var total = 0;
+      sup.list.forEach(function (s) {
+        total += s.area;
+      });
+      b.below = sup.list.map(function (s) {
+        return { p: s.p, share: s.area / (total || 1) };
+      });
+      pressure(b.weight, sup.list).forEach(function (a) {
+        a.p.above += a.kg;
+      });
+      below.push(b);
+    });
+    return held;
+  }
+
+  var SNAP = 60; /* mm: a box let go this close to a wall or a box touches it */
+
+  /* Where box `index` lands when the operator lets it go with its corner at
+     (x, z); turn swaps its length and width. Returns { box, ok, reason }:
+     the box at rest (snapped, inside the space, on the floor or on the
+     boxes under it), and whether it fits under the roof. */
+  function dropAt(vehicle, placed, index, x, z, opts) {
+    opts = opts || {};
+    var src = placed[index];
+    var l = opts.turn ? src.w : src.l;
+    var w = opts.turn ? src.l : src.w;
+    var going = riders(placed, index);
+    var others = placed.filter(function (p, i) {
+      return i !== index && going.indexOf(p) < 0;
+    });
+    function snap(v, size, wall, lo, hi) {
+      if (opts.snap === false) return v;
+      var best = v;
+      var gap = SNAP;
+      var marks = [0, wall - size];
+      others.forEach(function (p) {
+        marks.push(p[lo] + p[hi], p[lo] - size);
+      });
+      marks.forEach(function (m) {
+        if (Math.abs(m - v) < gap) {
+          gap = Math.abs(m - v);
+          best = m;
+        }
+      });
+      return best;
+    }
+    x = snap(x, l, vehicle.l, 'x', 'l');
+    z = snap(z, w, vehicle.w, 'z', 'w');
+    x = Math.round(clamp(x, 0, Math.max(0, vehicle.l - l)));
+    z = Math.round(clamp(z, 0, Math.max(0, vehicle.w - w)));
+    var box = bare(src);
+    box.x = x;
+    box.z = z;
+    box.l = l;
+    box.w = w;
+    box.y = restingY(box, others);
+    var reason = '';
+    if (l > vehicle.l + EPS || w > vehicle.w + EPS) reason = 'Assim girado, o volume não cabe no espaço de carga.';
+    else if (box.y + box.h > vehicle.h + EPS) reason = 'Aí o volume passaria do teto: a pilha embaixo é alta demais.';
+    return { box: box, ok: !reason, reason: reason };
+  }
+
+  /* What a hand-made position breaks: base support, a fragile box under
+     load, more weight on a box than it bears, a box in the way of an earlier
+     delivery (by itinerary) or another client's block (by client). */
+  function handProblems(ctx, placed) {
+    var held = relate(placed);
+    var need = ctx.rules.support / 100;
+    var out = [];
+    placed.forEach(function (b, i) {
+      var name = b.name || 'Volume';
+      if (held[i] < need - 1e-6) {
+        out.push({ kind: 'support', hard: false, excess: need - held[i],
+          text: name + ': só ' + Math.round(held[i] * 100) + '% da base apoiada (mín. ' + ctx.rules.support + '%).' });
+      }
+      if (b.fragile && b.above > 0.5) {
+        out.push({ kind: 'fragile', hard: false, excess: 0.2, text: name + ' é frágil e tem ' + fmt(b.above) + ' kg em cima.' });
+      } else if (b.maxTop !== Infinity && b.above > b.maxTop + 0.5) {
+        out.push({ kind: 'maxTop', hard: false, excess: (b.above - b.maxTop) / Math.max(1, b.maxTop),
+          text: name + ' aguenta ' + fmt(b.maxTop) + ' kg em cima e está com ' + fmt(b.above) + ' kg.' });
+      }
+    });
+    if (ctx.mode !== 'normal') {
+      var flagged = 0;
+      placed.forEach(function (b, i) {
+        if (flagged >= 3) return;
+        var rest = placed.filter(function (p, k) {
+          return k !== i;
+        });
+        if (blocks(b, b.stop, rest, ctx.mode === 'cliente')) {
+          flagged++;
+          out.push({ kind: 'order', hard: false, excess: 0.2,
+            text: (b.name || 'Volume') + (ctx.mode === 'cliente'
+              ? ' está misturado com o bloco de outro cliente.'
+              : ' fica no caminho de uma entrega anterior.') });
+        }
+      });
+    }
+    return out;
+  }
+
+  /* The plan as the operator left it: totals, the axle check and the
+     problems of the hand-made positions. */
+  function evaluate(input, placed, unplaced) {
+    var ctx = context(input);
+    return judge(ctx, settle(placed), unplaced || []);
+  }
+
+  function judge(ctx, placed, unplaced) {
+    var check = verify(ctx.vehicle, ctx.tractor, placed, ctx.verifyStops, ctx.rules);
+    handProblems(ctx, placed).forEach(function (p) {
+      check.problems.push({ state: 'Saída', kind: p.kind, hard: p.hard, text: p.text, excess: p.excess });
+      check.penalty += 2 * Math.max(0.001, p.excess);
+    });
+    var totals = summarize(placed, unplaced);
+    return finish({
+      placed: placed, unplaced: unplaced, totals: totals, check: check, shift: 0,
+      score: scoreOf(totals, check), perm: null
+    }, ctx);
+  }
+
+  /* Manual mode after the list, the vehicle or the rules changed: the boxes
+     the operator placed stay (those whose item is still on the list, up to
+     its quantity, still inside the space and the same size), and the boxes
+     still missing are put around them by the usual construction. */
+  function fill(input, fixed) {
+    var ctx = context(input);
+    var V = ctx.vehicle;
+    var byId = {};
+    var left = {};
+    (input.items || []).forEach(function (it) {
+      byId[it.id] = it;
+      left[it.id] = it.qty;
+    });
+    var dims = function (o) {
+      return [o.l, o.w, o.h].map(Math.round).sort(function (a, b) {
+        return a - b;
+      }).join();
+    };
+    var keep = [];
+    (fixed || []).forEach(function (b) {
+      var it = byId[b.id];
+      if (!it || !(left[b.id] > 0) || dims(b) !== dims(it)) return;
+      if (b.x < -EPS || b.z < -EPS || b.x + b.l > V.l + EPS || b.z + b.w > V.w + EPS || b.y + b.h > V.h + EPS) return;
+      left[b.id]--;
+      var client = Math.max(0, ctx.stops.indexOf(it.dest || ''));
+      var k = bare(b);
+      k.name = it.name;
+      k.color = it.color;
+      k.weight = it.weight || 0;
+      k.fragile = !!it.fragile;
+      k.maxTop = has(it.maxTop) && it.maxTop >= 0 ? it.maxTop : Infinity;
+      k.client = client;
+      k.stop = ctx.mode === 'normal' ? 0 : client;
+      keep.push(k);
+    });
+    keep = settle(keep);
+    /* the boxes still to place */
+    var skip = {};
+    keep.forEach(function (b) {
+      skip[b.id] = (skip[b.id] || 0) + 1;
+    });
+    ctx.queue = ctx.queue.filter(function (it) {
+      if (skip[it.id] > 0) {
+        skip[it.id]--;
+        return false;
+      }
+      return true;
+    });
+    var best = null;
+    var keys = ctx.queue.length > 150 ? ['volume'] : ['volume', 'longest', 'weight'];
+    keys.forEach(function (key) {
+      var base = keep.map(bare);
+      relate(base);
+      var r = construct(ctx, ordered(ctx.queue, key), base);
+      var result = judge(ctx, r.placed, r.unplaced);
+      if (better(result, best)) best = result;
+    });
+    return best;
   }
 
   /* For the tests and scripts: the first plan, then `tries` random runs, all
@@ -759,12 +1218,10 @@
     var best = firstPlan(ctx);
     var rand = random(input.seed !== undefined ? input.seed : seedOf(input.items || [], input.vehicle));
     for (var i = 0; i < (tries || 0); i++) {
-      var r = randomTry(ctx, rand);
+      var r = randomTry(ctx, rand, best);
       if (better(r, best)) best = r;
     }
-    best.stops = ctx.stops;
-    best.rules = ctx.rules;
-    return best;
+    return finish(best, ctx);
   }
 
   /* The planner's entry point. Returns { best, cancel } with the first plan
@@ -778,9 +1235,7 @@
   function start(input, onUpdate) {
     var ctx = context(input);
     var t0 = Date.now();
-    var best = firstPlan(ctx);
-    best.stops = ctx.stops;
-    best.rules = ctx.rules;
+    var best = finish(firstPlan(ctx), ctx);
     var tries = 3;
     var searchStarted = false;
     var stopped = false;
@@ -803,12 +1258,10 @@
          (a background tab, a headless browser) cannot hold the page */
       while (Date.now() - sliceStart < 25 && Date.now() - t0 < budget && inSlice < SLICE_TRIES && tries < MAX_TRIES) {
         inSlice++;
-        var r = randomTry(ctx, rand);
+        var r = randomTry(ctx, rand, best);
         tries++;
         if (better(r, best)) {
-          r.stops = ctx.stops;
-          r.rules = ctx.rules;
-          best = r;
+          best = finish(r, ctx);
           improved = true;
         }
       }
@@ -837,12 +1290,20 @@
     RULES: RULES,
     RULE_LIMITS: RULE_LIMITS,
     cleanRules: cleanRules,
+    MODES: MODES,
+    DEFAULT_MODE: DEFAULT_MODE,
+    cleanMode: cleanMode,
     stopOrder: stopOrder,
     expand: expand,
     orientations: orientations,
     axleModel: axleModel,
     verify: verify,
     planSync: planSync,
-    start: start
+    start: start,
+    dropAt: dropAt,
+    loadingSteps: loadingSteps,
+    settle: settle,
+    evaluate: evaluate,
+    fill: fill
   };
 })(typeof window !== 'undefined' ? window : this);
