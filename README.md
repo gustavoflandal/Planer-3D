@@ -1,6 +1,6 @@
 # Syncrofin 3D Planner
 
-Planejador de carga 3D para caminhões e contêineres, que roda no navegador. Você monta a lista de carga, escolhe o veículo e o app posiciona os volumes automaticamente. Ele mostra a ocupação de volume, peso, piso e metros lineares, além da distribuição de peso por eixo e do centro de gravidade.
+Planejador de carga 3D para vans, caminhões, carretas e contêineres, que roda no navegador. Você monta a lista de carga, escolhe o veículo e o app posiciona os volumes automaticamente. Ele mostra a ocupação de volume, peso, piso e metros lineares, além da distribuição de peso por eixo e do centro de gravidade.
 
 ## Requisitos
 
@@ -14,6 +14,7 @@ A vista 3D usa WebGL com o [Three.js](https://threejs.org) r170 (licença MIT), 
 - espaço de carga aberto para quem olha, com piso de chapa xadrez: paredes onduladas no contêiner e painéis brancos de baú nos caminhões, reboques e semirreboques;
 - o veículo montado a partir dos dados do espaço de carga: rodas nas distâncias dos eixos e na bitola (pneus arredondados, aros com porcas), cavalo mecânico com prato, tanque de combustível, pés de apoio do semirreboque, cambão do reboque, protetores laterais e para-choque traseiro;
 - cabine prata de teto alto, no estilo de um cavalo europeu moderno: para-brisa inclinado, quebra-sol, grade com frisos, faróis no para-choque, janelas, retrovisores, entradas de ar, degraus e caixas de roda recortadas sobre os eixos dianteiros. A mesma cabine serve ao caminhão rígido, ajustada à altura do baú.
+- vans e furgões inteiriços, brancos: capô curto, para-brisa inclinado até o teto, janelas das portas, faróis, grade, para-choques, retrovisores, assoalho baixo, rodas menores e caixas de roda recortadas na lateral (a traseira sobe sobre a roda quando ela passa da altura do assoalho).
 
 Se o navegador não tiver WebGL, ou se a página for aberta direto do disco (`file://`, onde os módulos JavaScript não carregam), o app usa o desenho 2D de antes.
 
@@ -32,28 +33,29 @@ python -m http.server 8080 --directory dist
 
 Depois abra http://127.0.0.1:8080/.
 
-Os planos ficam guardados apenas no navegador (localStorage).
+Os planos ficam salvos apenas no navegador (localStorage).
 
 ## Espaços de carga
 
-O espaço de carga é o veículo ou contentor onde a carga é posicionada.
+O espaço de carga é o veículo ou contêiner onde a carga é posicionada.
 
 - **Painel do espaço:** fica sobre a vista 3D e mostra o espaço escolhido com as dimensões internas. Uma linha traz a capacidade (peso, volume e metros livres) e outra o que a lista de carga pede; o valor fica em vermelho quando passa da capacidade.
-- **Lista de espaços:** a seta ▾ do painel abre a lista. Dá para filtrar por tipo (contentores, caminhões, reboques) e marcar favoritos com ★. Ao escolher um semirreboque, aparece a lista de **cavalos mecânicos**.
+- **Lista de espaços:** a seta ▾ do painel abre a lista. Dá para filtrar por tipo (contêineres, vans e furgões, caminhões, reboques) e marcar favoritos com ★. Ao escolher um semirreboque, aparece a lista de **cavalos mecânicos**.
   - Com cavalo, a carga no pino-rei é repartida pelos eixos do cavalo.
   - Sem cavalo, só a carga no pino-rei é calculada.
 - **Aba "Espaços de carga":** tabela de todos os espaços, com filtro por favorito, nome, tipo, origem e data de criação, ordenação por coluna e paginação.
-  - Os espaços **padrão** podem ser editados e repostos.
+  - Os espaços **padrão** podem ser editados e restaurados.
   - Os **personalizados** podem ser editados e apagados.
-- **Criar espaço personalizado:** campos de nome, tipo (18 tipos, incluindo semirreboque de 4 eixos, reboques de 3 e 4 eixos, caminhão bitruck de 4 eixos e cavalo mecânico de 4 eixos em duas versões: 2 + 2 e 1 + 3), comprimento, largura e altura internos, carga máxima e bitola.
+- **Criar espaço personalizado:** campos de nome, tipo (19 tipos, incluindo van / furgão, semirreboque de 4 eixos, reboques de 3 e 4 eixos, caminhão bitruck de 4 eixos e cavalo mecânico de 4 eixos em duas versões: 2 + 2 e 1 + 3), comprimento, largura e altura internos, carga máxima e bitola.
   - Cada eixo (A–E) tem distância, tara e carga máxima. No bitruck e no cavalo 8×4 (2 + 2), A e B formam o par dianteiro direcional, que divide a carga como o grupo traseiro. No cavalo 1 + 3, B, C e D formam o grupo traseiro.
   - Referência das distâncias (o 0): o prato no cavalo; a parede da frente do espaço de carga nos demais. No caminhão, o eixo dianteiro fica à frente do baú e a distância é negativa. A explicação, com um exemplo, aparece acima dos campos dos eixos.
   - Uma vista lateral em escala, com o mesmo veículo 3D do plano de carga (cabine, rodas nos eixos, baú, cambão, pino-rei e pés de apoio), mostra as cotas com os valores e o sinal (A = −1 300), marca onde fica o 0 e acompanha os valores enquanto você digita. Um eixo em posição impossível fica vermelho, com o motivo logo abaixo do desenho. Os campos ainda vazios usam os valores do exemplo. Sem WebGL, aparece um esquema simples com as mesmas cotas.
   - As distâncias medem-se a partir da parede frontal do espaço de carga; nos cavalos, a partir do prato.
-  - **Limites opcionais:** carga máxima do conjunto dianteiro e do traseiro (quando o conjunto tem mais de um eixo), peso bruto máximo (PBT; no semirreboque, PBTC da combinação; no cavalo, CMT/PBTC) e a **repartição** de cada eixo no seu conjunto, em % (vazio = igual; preenchida, tem de somar 100%). O catálogo já traz os limites usuais: conjunto duplo 17 000 kg, triplo 25 500 kg, PBT dos caminhões rígidos.
-- **Peso por eixo:** cada eixo mostra a carga mais a tara, a carga máxima e a divisão entre rodas esquerdas e direitas, calculada pela bitola e pelo desvio lateral do centro de gravidade. Os conjuntos aparecem com a sua carga e limite, e a linha de baixo traz o peso bruto.
+  - **Limites opcionais:** carga máxima do conjunto dianteiro e do traseiro (quando o conjunto tem mais de um eixo), peso bruto máximo (PBT; no semirreboque, PBTC da combinação; no cavalo, CMT/PBTC) e a **repartição** de cada eixo no seu conjunto, em % (vazio = igual; preenchida, precisa somar 100%). O catálogo já traz os limites usuais: conjunto duplo 17 000 kg, triplo 25 500 kg, PBT dos caminhões rígidos.
+- **Vans e furgões no catálogo:** minifurgão 650 kg (porte Fiat Fiorino, para entregas urbanas), furgão compacto 800 kg, van média 1,2 t, van grande teto alto 1,4 t e van extralonga 3,5 t. As medidas, taras e limites são típicos da categoria: confira com o documento do veículo e ajuste no cadastro.
+- **Peso por eixo:** com WebGL, o painel mostra o veículo 3D de lado, com a carga à vista pela lateral aberta; uma seta grande desce sobre cada eixo (o comprimento é a fração do limite usada e a cor é o estado: verde, amarelo ou vermelho), a carga em kg aparece sob a roda e uma seta azul fina marca o centro de gravidade. Em telas estreitas os valores passam a toneladas e os eixos próximos ganham duas linhas de rótulos. Sem WebGL fica o esquema 2D. Cada eixo mostra a carga mais a tara, a carga máxima e a divisão entre rodas esquerdas e direitas, calculada pela bitola e pelo desvio lateral do centro de gravidade. Os conjuntos aparecem com a sua carga e limite, e a linha de baixo traz o peso bruto.
 
-Os espaços personalizados, as edições e os favoritos ficam guardados no navegador.
+Os espaços personalizados, as edições e os favoritos ficam salvos no navegador.
 
 O código está em `src/spaces.js` (dados, validação e cálculo de eixos, sem DOM) e `src/spaces-ui.js` (telas).
 
@@ -101,7 +103,7 @@ O botão **Importar planilha** lê um arquivo Excel (`.xlsx`) ou CSV e acrescent
 - **Colunas:** são reconhecidas pelo cabeçalho, com ou sem acentos e em português ou inglês: Descrição, Comprimento, Largura, Altura, Peso, Quantidade, Destino e Cor, e, se quiser, Pode deitar (Sim/Não), Frágil (Sim/Não) e Peso máx. em cima (kg). Sem cabeçalho, a ordem esperada é essa mesma.
 - **Unidades:** as medidas são em mm, a menos que o cabeçalho diga `(cm)` ou `(m)`. O peso é em kg por unidade; um cabeçalho "Peso total" é dividido pela quantidade.
 - **CSV:** aceita `;`, `,` ou tab como separador, vírgula decimal e arquivos em UTF-8 ou Windows-1252, que é como o Excel salva no Brasil.
-- **Excel:** só a primeira folha é lida. Arquivos `.xls` antigos não são suportados: salve como `.xlsx` ou `.csv`.
+- **Excel:** só a primeira aba é lida. Arquivos `.xls` antigos não são suportados: salve como `.xlsx` ou `.csv`.
 - **Linhas inválidas** (sem medidas ou que não cabem no veículo escolhido) são ignoradas, e a mensagem indica o número de cada uma.
 
 ---

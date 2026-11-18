@@ -24,7 +24,9 @@
      drawbar trailer turns on a front tandem; they share the front load as the
      rear group shares its own. */
   var TYPES = [
-    { id: 'container', label: 'Contentor', group: 'container', kind: 'box', supports: 0 },
+    { id: 'container', label: 'Contêiner', group: 'container', kind: 'box', supports: 0 },
+    /* a van works out its axles like a rigid lorry; van only changes the model */
+    { id: 'van2', label: 'Van / furgão (2 eixos)', group: 'van', kind: 'lorry', supports: 2, van: true },
     { id: 'flatbed1', label: 'Plataforma (1 eixo)', group: 'trailer', kind: 'semi', supports: 2 },
     { id: 'flatbed2', label: 'Plataforma (2 eixos)', group: 'trailer', kind: 'semi', supports: 3 },
     { id: 'flatbed3', label: 'Plataforma (3 eixos)', group: 'trailer', kind: 'semi', supports: 4 },
@@ -54,7 +56,8 @@
   });
 
   var GROUPS = [
-    { id: 'container', label: 'Contentores' },
+    { id: 'container', label: 'Contêineres' },
+    { id: 'van', label: 'Vans e furgões' },
     { id: 'lorry', label: 'Caminhões' },
     { id: 'trailer', label: 'Reboques e semirreboques' }
   ];
@@ -108,9 +111,36 @@
     return { dist: dist, tare: tare, max: max };
   }
 
+  /* Vans: the cargo floor from the bulkhead behind the seats to the rear
+     doors, at full width (the wheel arches inside are left out). Typical
+     figures for the class, to be checked against the vehicle's documents. */
   var SYSTEM = [
     {
-      id: 'van', name: 'Furgão 3,5 t', type: 'lorry2',
+      /* small urban van, Fiat Fiorino class: 3,3 m³ */
+      id: 'minivan', name: 'Minifurgão 650 kg', type: 'van2',
+      l: 1870, w: 1270, h: 1260, payload: 650, track: 1420, gross: 1900,
+      axles: [ax(-1600, 700, 1000), ax(925, 450, 1050)]
+    },
+    {
+      /* compact van, Partner / Berlingo / Kangoo class: 3,4 m³ */
+      id: 'vancompact', name: 'Furgão compacto 800 kg', type: 'van2',
+      l: 1800, w: 1500, h: 1250, payload: 800, track: 1500, gross: 2150,
+      axles: [ax(-1650, 780, 1100), ax(1080, 520, 1200)]
+    },
+    {
+      /* mid-size van, Expert / Jumpy / Trafic class: 5,8 m³ */
+      id: 'vanmid', name: 'Van média 1,2 t', type: 'van2',
+      l: 2580, w: 1600, h: 1400, payload: 1200, track: 1600, gross: 2900,
+      axles: [ax(-1400, 1050, 1450), ax(1875, 650, 1650)]
+    },
+    {
+      /* large high-roof van, Sprinter / Daily / Master / Ducato class: 11 m³ */
+      id: 'vanhigh', name: 'Van grande teto alto 1,4 t', type: 'van2',
+      l: 3300, w: 1780, h: 1900, payload: 1400, track: 1700, gross: 3500,
+      axles: [ax(-1050, 1250, 1850), ax(2615, 850, 2250)]
+    },
+    {
+      id: 'van', name: 'Van extralonga 3,5 t', type: 'van2',
       l: 4300, w: 1800, h: 1900, payload: 1100, track: 1700, gross: 3500,
       axles: [ax(-1000, 1300, 1800), ax(2600, 900, 2300)]
     },
@@ -178,15 +208,15 @@
       axles: [ax(1200, 2000, 8500), ax(2550, 2000, 8500), ax(7600, 1900, 8500), ax(8950, 1900, 8500)]
     },
     {
-      id: 'ct20', name: 'Contentor 20 pés', type: 'container',
+      id: 'ct20', name: 'Contêiner 20 pés', type: 'container',
       l: 5900, w: 2350, h: 2390, payload: 28000, track: 0, axles: []
     },
     {
-      id: 'ct40', name: 'Contentor 40 pés', type: 'container',
+      id: 'ct40', name: 'Contêiner 40 pés', type: 'container',
       l: 12030, w: 2350, h: 2390, payload: 26500, track: 0, axles: []
     },
     {
-      id: 'ct40hc', name: 'Contentor 40 pés High Cube', type: 'container',
+      id: 'ct40hc', name: 'Contêiner 40 pés High Cube', type: 'container',
       l: 12030, w: 2350, h: 2690, payload: 26500, track: 0, axles: []
     },
     {
@@ -438,16 +468,16 @@
       ['l', 'w', 'h'].forEach(function (k) {
         var label = { l: 'O comprimento interno', w: 'A largura interna', h: 'A altura interna' }[k];
         if (!inRange(s[k], k)) {
-          err(k, label + ' tem de ficar entre ' + fmtLimit(LIMITS[k][0]) + ' e ' + fmtLimit(LIMITS[k][1]) + ' mm.');
+          err(k, label + ' deve ficar entre ' + fmtLimit(LIMITS[k][0]) + ' e ' + fmtLimit(LIMITS[k][1]) + ' mm.');
         }
       });
     }
     if (!inRange(s.payload, 'payload')) {
       err('payload', (tractor ? 'A carga máxima no prato' : 'A carga máxima do espaço') +
-        ' tem de ficar entre 1 e ' + fmtLimit(LIMITS.payload[1]) + ' kg.');
+        ' deve ficar entre 1 e ' + fmtLimit(LIMITS.payload[1]) + ' kg.');
     }
     if (t.supports && !inRange(s.track, 'track')) {
-      err('track', 'A bitola tem de ficar entre ' + fmtLimit(LIMITS.track[0]) + ' e ' + fmtLimit(LIMITS.track[1]) + ' mm.');
+      err('track', 'A bitola deve ficar entre ' + fmtLimit(LIMITS.track[0]) + ' e ' + fmtLimit(LIMITS.track[1]) + ' mm.');
     }
 
     var rs = roles(t.id);
@@ -456,19 +486,19 @@
       var a = axles[i] || {};
       var name = rs[i].label + ' (' + rs[i].letter + ')';
       if (!inRange(a.dist, 'dist')) err('axle' + i + '.dist', name + ': indique a distância em mm.');
-      if (!inRange(a.tare, 'tare')) err('axle' + i + '.tare', name + ': a tara tem de ficar entre 0 e ' + fmtLimit(LIMITS.tare[1]) + ' kg.');
-      if (!inRange(a.max, 'max')) err('axle' + i + '.max', name + ': a carga máxima tem de ficar entre 1 e ' + fmtLimit(LIMITS.max[1]) + ' kg.');
+      if (!inRange(a.tare, 'tare')) err('axle' + i + '.tare', name + ': a tara deve ficar entre 0 e ' + fmtLimit(LIMITS.tare[1]) + ' kg.');
+      if (!inRange(a.max, 'max')) err('axle' + i + '.max', name + ': a carga máxima deve ficar entre 1 e ' + fmtLimit(LIMITS.max[1]) + ' kg.');
     }
 
     /* the optional limits, when given */
     var g = groupsOf(t.id);
     [['frontMax', g.front, 'dianteiro'], ['rearMax', g.rear, 'traseiro']].forEach(function (k) {
       if (has(s[k[0]]) && k[1].length > 1 && !inRange(s[k[0]], 'groupMax')) {
-        err(k[0], 'A carga máxima do conjunto ' + k[2] + ' tem de ficar entre 1 e ' + fmtLimit(LIMITS.groupMax[1]) + ' kg.');
+        err(k[0], 'A carga máxima do conjunto ' + k[2] + ' deve ficar entre 1 e ' + fmtLimit(LIMITS.groupMax[1]) + ' kg.');
       }
     });
     if (has(s.gross) && !inRange(s.gross, 'gross')) {
-      err('gross', 'O peso bruto máximo tem de ficar entre 1 e ' + fmtLimit(LIMITS.gross[1]) + ' kg.');
+      err('gross', 'O peso bruto máximo deve ficar entre 1 e ' + fmtLimit(LIMITS.gross[1]) + ' kg.');
     }
     /* shares: all of a group or none, and they add up to 100% */
     [[g.front, 'dianteiro'], [g.rear, 'traseiro']].forEach(function (k) {
@@ -491,7 +521,7 @@
       });
       if (bad) err(first, 'Repartição do conjunto ' + k[1] + ': cada eixo leva entre 1 e 100%.');
       else if (Math.abs(sum - 100) > 0.5) {
-        err(first, 'Repartição do conjunto ' + k[1] + ': as percentagens somam ' + fmtLimit(Math.round(sum * 10) / 10) + '%, têm de somar 100%.');
+        err(first, 'Repartição do conjunto ' + k[1] + ': as percentagens somam ' + fmtLimit(Math.round(sum * 10) / 10) + '%, mas precisam somar 100%.');
       }
     });
     if (errors.length) return errors;
@@ -499,13 +529,13 @@
     /* Geometry: supports in order from the front, the right ones where they must be. */
     for (var j = 1; j < t.supports; j++) {
       if (axles[j].dist <= axles[j - 1].dist) {
-        err('axle' + j + '.dist', rs[j].label + ' (' + rs[j].letter + ') tem de ficar atrás de ' +
+        err('axle' + j + '.dist', rs[j].label + ' (' + rs[j].letter + ') deve ficar atrás de ' +
           rs[j - 1].label.toLowerCase() + ' (' + rs[j - 1].letter + ').');
       }
     }
     if (t.kind === 'semi') {
       if (axles[0].dist < 0 || axles[0].dist > s.l / 2) {
-        err('axle0.dist', 'O pino-rei (A) tem de ficar na metade da frente do espaço de carga.');
+        err('axle0.dist', 'O pino-rei (A) deve ficar na metade da frente do espaço de carga.');
       }
       if (axles[t.supports - 1].dist > s.l + 3000) {
         err('axle' + (t.supports - 1) + '.dist', 'O último eixo fica longe demais da traseira do espaço de carga.');
@@ -513,7 +543,7 @@
     }
     if (t.kind === 'lorry' || t.kind === 'trailer') {
       if (axles[t.supports - 1].dist <= 0) {
-        err('axle' + (t.supports - 1) + '.dist', 'Os eixos traseiros têm de ficar sob o espaço de carga.');
+        err('axle' + (t.supports - 1) + '.dist', 'Os eixos traseiros devem ficar sob o espaço de carga.');
       }
     }
     if (t.kind === 'tractor') {
@@ -523,7 +553,7 @@
         }
       }
       if (axles[t.supports - 1].dist < -2000 || axles[t.supports - 1].dist > 3000) {
-        err('axle' + (t.supports - 1) + '.dist', 'Os eixos traseiros têm de ficar perto do prato (entre -2 000 e 3 000 mm).');
+        err('axle' + (t.supports - 1) + '.dist', 'Os eixos traseiros devem ficar perto do prato (entre -2 000 e 3 000 mm).');
       }
     }
     return errors;

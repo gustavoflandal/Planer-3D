@@ -173,7 +173,7 @@ const checks = [];
 const canvas = elements['#view'];
 checks.push(['canvas sized', canvas.width > 0 && canvas.height > 0]);
 checks.push(['3D drawing happened', log.fills > 3 && log.strokes > 0]);
-checks.push(['catalogue loaded', Spaces.all().length === 20 && Spaces.cargoSpaces().length === 16 && Spaces.tractors().length === 4]);
+checks.push(['catalogue loaded', Spaces.all().length === 24 && Spaces.cargoSpaces().length === 20 && Spaces.tractors().length === 4]);
 checks.push(['default is the semitrailer with a tractor', String(elements['#vehicle-dims'].textContent).startsWith('Semirreboque 13,6 m + Cavalo padrão')]);
 checks.push(['cargo rows rendered', elements['#items'].children.length > 0]);
 checks.push(['status written', String(elements['#status'].textContent).length > 5]);
@@ -367,7 +367,7 @@ function spaceChecks() {
   const fakeStore = { getItem: (k) => (mem.has(k) ? mem.get(k) : null), setItem: (k, v) => mem.set(k, String(v)) };
   Spaces.useStorage(fakeStore);
 
-  out.push(['18 space types', Spaces.TYPES.length === 18]);
+  out.push(['19 space types', Spaces.TYPES.length === 19]);
   out.push(['4-axle types: semitrailer, bitruck, tractor', ['semi4', 'lorry4', 'truck4'].every((id) => Spaces.typeOf(id))]);
   out.push(['roles: semitrailer with 4 axles runs A to E', Spaces.roles('semi4').map((r) => r.letter).join('') === 'ABCDE']);
   out.push(['roles: bitruck steers on A and B', Spaces.roles('lorry4').map((r) => r.group).join() === 'front,front,rear,rear' &&
@@ -395,12 +395,17 @@ function spaceChecks() {
 
   const saved = Spaces.save(good);
   out.push(['custom space saved', saved.ok && saved.space.origin === 'custom' && /^\d{4}-\d{2}-\d{2}$/.test(saved.space.created) &&
-    Spaces.all().length === 21]);
+    Spaces.all().length === 25]);
   const id = saved.space.id;
   out.push(['custom space persisted', JSON.parse(mem.get('syncrofin.spaces.v1')).custom.length === 1]);
 
   out.push(['type filter: containers', Spaces.filter(Spaces.cargoSpaces(), { groups: ['container'] }).length === 3]);
-  out.push(['type filter: lorries + trailers', Spaces.filter(Spaces.cargoSpaces(), { groups: ['lorry', 'trailer'] }).length === 14]);
+  out.push(['type filter: lorries + trailers', Spaces.filter(Spaces.cargoSpaces(), { groups: ['lorry', 'trailer'] }).length === 13]);
+  out.push(['type filter: vans', Spaces.filter(Spaces.cargoSpaces(), { groups: ['van'] }).length === 5]);
+  out.push(['minifurgão is a valid 2-axle van', (function () {
+    const m = Spaces.get('minivan');
+    return !!m && m.type === 'van2' && Spaces.validate(Spaces.clean(m)).length === 0 && Spaces.roles('van2').map((r) => r.role).join() === 'front,rear';
+  })()]);
   Spaces.toggleFavorite(id);
   out.push(['favourites filter', Spaces.filter(Spaces.cargoSpaces(), { favoritesOnly: true }).map((s) => s.id).sort().join() === [id, 'semi'].sort().join()]);
 
@@ -629,7 +634,7 @@ try {
   sb2.window.document = document;
   vm.createContext(sb2);
   for (const name of SCRIPTS) vm.runInContext(srcFile(name), sb2, { filename: name });
-  checks.push(['old saved plan opens on the same vehicle', String(elements['#vehicle-dims'].textContent).startsWith('Contentor 20 pés ·')]);
+  checks.push(['old saved plan opens on the same vehicle', String(elements['#vehicle-dims'].textContent).startsWith('Contêiner 20 pés ·')]);
   checks.push(['container shows no axle loads', elements['#axle-list'].children.length === 1 &&
     elements['#axle-list'].children[0].className === 'axle-none']);
 }

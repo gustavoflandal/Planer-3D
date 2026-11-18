@@ -710,9 +710,136 @@
 
   var AXLE_COLORS = { over: '#d64545', warn: '#e4a934', ok: '#5f9e54' };
 
+  /* The axle loads over a side view of the 3D vehicle with its cargo, cut
+     open on the near side (SyncrofinScene.side): a broad arrow comes down on
+     every axle, its length the share of the axle's limit, in the colour of
+     its status, with the load under the wheel; a thin blue one marks the
+     centre of gravity. Returns false when there is no WebGL picture. */
+  function drawAxle3d(cv, res) {
+    var gl = window.SyncrofinScene;
+    if (!gl || !gl.active || !gl.side) return false;
+    var cssW = cv.clientWidth || (cv.parentNode && cv.parentNode.clientWidth) || 720;
+    var padT = 30;
+    var padB = res.rows.length ? 44 : 30;
+    var view = null;
+    try {
+      view = gl.side(currentVehicle(), Math.max(120, cssW - 24), 230, Object.assign({ canvas: true }, sceneData()));
+    } catch (e) {
+      view = null;
+    }
+    if (!view || !view.canvas) return false;
+
+    var cssH = padT + view.heightPx + padB;
+    var dpr = window.devicePixelRatio || 1;
+    cv.style.height = cssH + 'px';
+    cv.width = Math.round(cssW * dpr);
+    cv.height = Math.round(cssH * dpr);
+    var ac = cv.getContext('2d');
+    if (!ac) return false;
+    ac.setTransform(dpr, 0, 0, dpr, 0, 0);
+    ac.clearRect(0, 0, cssW, cssH);
+
+    var offX = Math.round((cssW - view.width) / 2);
+    var ground = padT + view.heightPx;
+    var k = view.pxPerMm;
+    function X(mm) {
+      return offX + (mm - view.minX) * k;
+    }
+    ac.drawImage(view.canvas, offX, padT, view.width, view.heightPx);
+    ac.strokeStyle = '#c3c8ce';
+    ac.lineWidth = 1.5;
+    ac.beginPath();
+    ac.moveTo(8, ground + 0.5);
+    ac.lineTo(cssW - 8, ground + 0.5);
+    ac.stroke();
+
+    var deckY = ground - view.deck * k;
+    var wheelY = ground - 500 * k; /* wheel centres: the model's wheels are 1 m across */
+
+    function arrow(x, yTop, yTip, shaft, head, colour) {
+      var headH = Math.min(head * 0.9, (yTip - yTop) * 0.6);
+      ac.beginPath();
+      ac.moveTo(x - shaft / 2, yTop);
+      ac.lineTo(x + shaft / 2, yTop);
+      ac.lineTo(x + shaft / 2, yTip - headH);
+      ac.lineTo(x + head / 2, yTip - headH);
+      ac.lineTo(x, yTip);
+      ac.lineTo(x - head / 2, yTip - headH);
+      ac.lineTo(x - shaft / 2, yTip - headH);
+      ac.closePath();
+      ac.fillStyle = colour;
+      ac.fill();
+    }
+
+    /* centre of gravity of the cargo */
+    if (res.totalW > 0) {
+      var cgx = X(res.cgx);
+      ac.globalAlpha = 0.85;
+      arrow(cgx, padT - 8, deckY, 4, 12, '#5fc2ea');
+      ac.globalAlpha = 1;
+      ac.font = '700 12px Arial, Tahoma, Verdana, sans-serif';
+      ac.textAlign = 'center';
+      ac.fillStyle = '#2b8fb8';
+      ac.fillText('CG', cgx, padT - 13);
+    }
+
+    if (!res.rows.length) {
+      ac.font = '12px Arial, Tahoma, Verdana, sans-serif';
+      ac.textAlign = 'center';
+      ac.fillStyle = '#5d5d5d';
+      ac.fillText('Sem eixos próprios: escolha um caminhão, reboque ou semirreboque para ver as cargas por eixo.', cssW / 2, ground + 20);
+      return true;
+    }
+
+    var shown = res.rows.filter(function (r) {
+      return !r.info; /* a kingpin resting on the tractor: its load is on the tractor's axles */
+    });
+    /* close axles (a tandem 1.3 m apart on a phone) get shorter labels and two rows */
+    var gap = Infinity;
+    for (var i = 1; i < shown.length; i++) gap = Math.min(gap, Math.abs(shown[i].x - shown[i - 1].x) * k);
+    var tight = gap < 64;
+    var shaft = Math.max(6, Math.min(16, gap * 0.28));
+    var head = Math.max(14, Math.min(34, gap * 0.62));
+    var full = Math.max(30, wheelY - (padT - 4));
+
+    ac.font = '700 ' + (tight ? 10.5 : 11.5) + 'px Arial, Tahoma, Verdana, sans-serif';
+    ac.textAlign = 'center';
+    ac.textBaseline = 'middle';
+    var lastRight = [-Infinity, -Infinity];
+    shown.forEach(function (r) {
+      var x = X(r.x);
+      var kingpin = r.part === 'kingpin';
+      var tip = kingpin ? deckY : wheelY;
+      var share = r.max > 0 ? Math.min(1, r.load / r.max) : 0.5;
+      var len = Math.max(26, (kingpin ? full - (wheelY - deckY) : full) * (0.35 + 0.65 * share));
+      ac.globalAlpha = 0.78;
+      arrow(x, tip - len, tip, shaft, head, AXLE_COLORS[r.status] || AXLE_COLORS.ok);
+      ac.globalAlpha = 1;
+
+      var text = (kingpin ? 'PR ' : '') + (tight && r.load >= 1000 ? fmt(r.load / 1000, 1) + ' t' : fmt(r.load) + ' kg');
+      var tw = ac.measureText(text).width + 10;
+      var row = x - tw / 2 < lastRight[0] + 3 ? 1 : 0;
+      if (row === 1 && x - tw / 2 < lastRight[1] + 3) row = 0;
+      lastRight[row] = x + tw / 2;
+      var ly = ground + 11 + row * 18;
+      ac.fillStyle = r.status === 'over' ? '#b83232' : '#2f3337';
+      ac.fillRect(Math.round(x - tw / 2), ly - 8, Math.round(tw), 16);
+      ac.fillStyle = '#ffffff';
+      ac.fillText(text, x, ly + 0.5);
+    });
+    ac.textBaseline = 'alphabetic';
+    return true;
+  }
+
+  function drawAxlePicture() {
+    if (els.axleCanvas) drawAxle(computeAxles(currentVehicle(), state.placed));
+  }
+
   function drawAxle(res) {
     var cv = els.axleCanvas;
     if (!cv) return;
+    if (drawAxle3d(cv, res)) return;
+    cv.style.height = '';
     var vehicle = currentVehicle();
     var tractor = currentTractor();
     var kind = (Spaces.typeOf(vehicle.type) || {}).kind;
@@ -928,7 +1055,7 @@
         text += ' · peso bruto ' + fmt(res.gross.load) + ' kg' + (res.gross.max ? ' (máx. ' + fmt(res.gross.max) + ' kg)' : '');
       }
       if (Spaces.takesTractor(vehicle) && !currentTractor()) {
-        text += ' · sem cavalo: só se calcula a carga no pino-rei.';
+        text += ' · sem cavalo: só é calculada a carga no pino-rei.';
       }
       els.axleCog.textContent = text;
     }
@@ -1125,6 +1252,7 @@
     redraw: function () {
       sceneDirty = true;
       draw();
+      drawAxlePicture(); /* the WebGL view may have just arrived */
     }
   };
 
@@ -1146,7 +1274,7 @@
       return;
     }
     if (l < 50 || w < 50 || h < 20) {
-      els.formMsg.textContent = 'As medidas têm de ser pelo menos 50 × 50 × 20 mm.';
+      els.formMsg.textContent = 'As medidas precisam ser de pelo menos 50 × 50 × 20 mm.';
       return;
     }
     if (l > vehicle.l || w > vehicle.w || h > vehicle.h) {
@@ -1155,14 +1283,14 @@
       return;
     }
     if (qty < 1 || qty > 500) {
-      els.formMsg.textContent = 'A quantidade tem de ficar entre 1 e 500.';
+      els.formMsg.textContent = 'A quantidade deve ficar entre 1 e 500.';
       return;
     }
 
     var maxTopRaw = els.maxTop ? String(els.maxTop.value).trim() : '';
     var maxTop = maxTopRaw === '' ? null : Math.round(num(maxTopRaw, NaN));
     if (maxTopRaw !== '' && !(maxTop >= 0 && maxTop <= 100000)) {
-      els.formMsg.textContent = 'O peso máximo em cima tem de ficar entre 0 e 100 000 kg (vazio = sem limite).';
+      els.formMsg.textContent = 'O peso máximo em cima deve ficar entre 0 e 100 000 kg (vazio = sem limite).';
       return;
     }
 
@@ -1409,7 +1537,7 @@
       weight = Math.round(weight * 100) / 100;
 
       var reason = null;
-      if (!isFinite(l) || !isFinite(w) || !isFinite(h)) reason = 'medidas em falta';
+      if (!isFinite(l) || !isFinite(w) || !isFinite(h)) reason = 'medidas faltando';
       else if (l < 50 || w < 50 || h < 20) reason = 'medidas abaixo de 50 × 50 × 20 mm';
       else if (l > vehicle.l || w > vehicle.w || h > vehicle.h) reason = 'não cabe no ' + vehicle.name;
       else if (qty < 1 || qty > 500) reason = 'quantidade fora de 1 a 500';
@@ -1644,13 +1772,13 @@
     try {
       entries = readZip(bytes);
     } catch (e) {
-      return Promise.reject(new Error('O ficheiro .xlsx está danificado.'));
+      return Promise.reject(new Error('O arquivo .xlsx está corrompido.'));
     }
     if (!entries['xl/workbook.xml']) {
-      return Promise.reject(new Error('Este ficheiro não é uma planilha Excel (.xlsx). Guarde-a como .xlsx ou .csv.'));
+      return Promise.reject(new Error('Este arquivo não é uma planilha Excel (.xlsx). Salve-a como .xlsx ou .csv.'));
     }
     if (typeof DecompressionStream === 'undefined') {
-      return Promise.reject(new Error('Este navegador não abre ficheiros .xlsx. Guarde a planilha como .csv e importe de novo.'));
+      return Promise.reject(new Error('Este navegador não abre arquivos .xlsx. Salve a planilha como .csv e importe de novo.'));
     }
     return Promise.all([
       unzipText(entries, 'xl/workbook.xml'),
@@ -1676,7 +1804,7 @@
           return /^xl\/worksheets\/[^/]+\.xml$/.test(k);
         }).sort()[0];
       }
-      if (!sheetPath) throw new Error('A planilha não tem nenhuma folha.');
+      if (!sheetPath) throw new Error('A planilha não tem nenhuma aba.');
 
       var shared = [];
       var siRe = /<(?:\w+:)?si\b[^>]*?(?:\/>|>([\s\S]*?)<\/(?:\w+:)?si>)/g;
@@ -1695,12 +1823,12 @@
       return parseXlsx(bytes);
     }
     if (bytes.length >= 4 && bytes[0] === 0xd0 && bytes[1] === 0xcf && bytes[2] === 0x11 && bytes[3] === 0xe0) {
-      return Promise.reject(new Error('Ficheiros .xls antigos não são lidos. No Excel, guarde a planilha como .xlsx ou .csv.'));
+      return Promise.reject(new Error('Arquivos .xls antigos não são lidos. No Excel, salve a planilha como .xlsx ou .csv.'));
     }
     try {
       return Promise.resolve(parseCsv(decodeText(bytes)));
     } catch (e) {
-      return Promise.reject(new Error('Não consegui ler o ficheiro como CSV.'));
+      return Promise.reject(new Error('Não consegui ler o arquivo como CSV.'));
     }
   }
 
@@ -1736,7 +1864,7 @@
   function importFile(file) {
     if (!file) return Promise.resolve();
     if (file.size > IMPORT_MAX_BYTES) {
-      setMsg('O ficheiro tem mais de 10 MB. Importe uma planilha mais pequena.', false);
+      setMsg('O arquivo tem mais de 10 MB. Importe uma planilha menor.', false);
       return Promise.resolve();
     }
     setMsg('A ler ' + file.name + '…', true);
@@ -1885,7 +2013,10 @@
     var resizeTimer = null;
     window.addEventListener('resize', function () {
       window.clearTimeout(resizeTimer);
-      resizeTimer = window.setTimeout(draw, 80);
+      resizeTimer = window.setTimeout(function () {
+        draw();
+        drawAxlePicture();
+      }, 80);
     });
 
     if (window.ResizeObserver) {
