@@ -1,0 +1,25 @@
+# Landing page do Syncrofin 3D Planner em syncrofin.com.br/planner
+# Subir/atualizar (na pasta landing/):  docker compose up -d --build
+# Passo a passo completo em DEPLOY.md.
+services:
+  planner-landing:
+    build: .
+    image: planner-landing:latest
+    container_name: planner-landing
+    restart: unless-stopped
+    # Porta so no localhost da VPS (nao fica exposta na internet); serve para
+    # testar com curl. Se 8091 ja estiver em uso, troque o numero da esquerda.
+    ports:
+      - "127.0.0.1:8091:80"
+    logging:
+      driver: json-file
+      options: { max-size: "10m", max-file: "3" }
+    # A rede do Caddy que atende syncrofin.com.br (mesma usada pelo pdv-lev-landing).
+    networks:
+      - default
+      - syncrofin
+
+networks:
+  syncrofin:
+    external: true
+    name: syncrofin-pessoal_default
