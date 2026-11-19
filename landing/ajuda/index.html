@@ -1,0 +1,789 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Manual do usuário — Syncrofin 3D Planner</title>
+<meta name="description" content="Manual do Syncrofin 3D Planner: lista de carga, espaços de carga, otimização, modos de planejamento, ajuste manual, peso por eixo, amarração e ordem de carregamento.">
+<meta name="color-scheme" content="light">
+<style>
+/* Same palette and type as the planner (src/styles.css), so the manual reads as part of the app. */
+:root {
+  --ink: #2f3337;
+  --text: #4a4f54;
+  --muted: #6b6b6b;
+  --line: #e3e6e9;
+  --line-strong: #cfd4d9;
+  --panel: #ffffff;
+  --bg: #eef1f4;
+  --soft: #f6f8fa;
+  --dark: #5c5b5b;
+  --dark-2: #4a4949;
+  --amber: #e4a934;
+  --amber-2: #d1952a;
+  --amber-soft: #fdf4e1;
+  --blue: #5fc2ea;
+  --blue-ink: #1e6f92;
+  --blue-soft: #e6f5fc;
+  --green: #8fc98a;
+  --green-ink: #2f7a3b;
+  --green-soft: #e8f5e6;
+  --red: #c0392b;
+  --red-soft: #fbeae8;
+  --font: Arial, Tahoma, Verdana, sans-serif;
+  --mono: Consolas, "Courier New", monospace;
+  --radius: 8px;
+  --shadow: 0 1px 2px rgba(30, 40, 50, 0.08), 0 8px 24px rgba(30, 40, 50, 0.08);
+}
+* { box-sizing: border-box; }
+html { scroll-behavior: smooth; scroll-padding-top: 76px; }
+@media (prefers-reduced-motion: reduce) { html { scroll-behavior: auto; } }
+body { margin: 0; background: var(--bg); color: var(--text); font: 16px/1.65 var(--font); }
+img { max-width: 100%; height: auto; display: block; }
+a { color: var(--blue-ink); }
+:focus-visible { outline: 3px solid var(--blue); outline-offset: 2px; border-radius: 3px; }
+
+/* top bar, as in the planner */
+.topbar { position: sticky; top: 0; z-index: 10; display: flex; align-items: center; gap: 16px; padding: 12px 20px; background: var(--dark); color: #fff; box-shadow: 0 1px 0 rgba(0, 0, 0, 0.12); }
+.brand { display: flex; align-items: center; gap: 9px; font-size: 19px; font-weight: 700; white-space: nowrap; color: #fff; text-decoration: none; }
+.brand b { color: var(--amber); }
+.mark { display: inline-flex; align-items: flex-end; gap: 3px; height: 22px; }
+.mark span { display: block; width: 6px; border-radius: 1px; background: var(--amber); }
+.mark span:nth-child(1) { height: 13px; background: var(--blue); }
+.mark span:nth-child(2) { height: 22px; }
+.mark span:nth-child(3) { height: 17px; background: #fec528; }
+.topbar .title { color: #dedede; font-weight: 700; padding-left: 16px; border-left: 1px solid rgba(255, 255, 255, 0.25); white-space: nowrap; }
+.top-actions { margin-left: auto; display: flex; gap: 8px; }
+.btn { display: inline-flex; align-items: center; gap: 8px; padding: 8px 14px; border-radius: 6px; border: 1px solid rgba(255, 255, 255, 0.35); background: rgba(255, 255, 255, 0.1); color: #fff; font: 700 15px/1.2 var(--font); text-decoration: none; cursor: pointer; white-space: nowrap; }
+.btn:hover { background: rgba(255, 255, 255, 0.2); }
+.btn.primary { background: linear-gradient(180deg, #f0bc51, var(--amber-2)); border-color: transparent; }
+.btn.primary:hover { filter: brightness(1.05); }
+.btn .short { display: none; }
+
+/* layout: contents on the left, the manual on the right */
+.layout { display: grid; grid-template-columns: 280px minmax(0, 1fr); gap: 32px; max-width: 1240px; margin: 0 auto; padding: 28px 20px 64px; }
+.toc { position: sticky; top: 76px; align-self: start; max-height: calc(100vh - 96px); overflow: auto; background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius); padding: 16px 8px 16px 16px; }
+.toc h2 { margin: 0 0 8px; font-size: 13px; letter-spacing: 0.6px; text-transform: uppercase; color: var(--muted); }
+.toc ol { list-style: none; margin: 0; padding: 0; counter-reset: t; }
+.toc li { counter-increment: t; }
+.toc a { display: grid; grid-template-columns: 26px 1fr; padding: 5px 8px 5px 0; border-radius: 6px; color: var(--text); text-decoration: none; font-size: 14.5px; line-height: 1.35; }
+.toc a::before { content: counter(t) "."; color: var(--muted); font-weight: 700; }
+.toc a:hover { color: var(--ink); background: var(--soft); }
+.toc a.on { color: var(--ink); font-weight: 700; background: var(--amber-soft); }
+.toc a.on::before { color: var(--amber-2); }
+.toc-mobile { display: none; }
+
+.doc { min-width: 0; }
+.intro { background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius); padding: 28px 32px; margin-bottom: 24px; box-shadow: var(--shadow); }
+.intro h1 { margin: 0 0 10px; font-size: 32px; line-height: 1.15; color: var(--ink); }
+.intro p { margin: 0; font-size: 17px; max-width: 70ch; }
+.search { margin-top: 18px; display: flex; gap: 8px; align-items: center; }
+.search input { flex: 1 1 auto; max-width: 420px; padding: 10px 12px; border: 1px solid var(--line-strong); border-radius: 6px; background: var(--soft); font: 16px var(--font); color: var(--ink); }
+.search span { font-size: 14px; color: var(--muted); }
+
+section.chapter { background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius); padding: 28px 32px 30px; margin-bottom: 24px; }
+section.chapter[hidden] { display: none; }
+.chapter > h2 { margin: 0 0 14px; font-size: 25px; line-height: 1.2; color: var(--ink); display: flex; gap: 12px; align-items: baseline; }
+.chapter > h2 .n { flex: none; display: inline-grid; place-items: center; width: 34px; height: 34px; border-radius: 8px; background: var(--dark); color: var(--amber); font-size: 17px; }
+.chapter h3 { margin: 26px 0 8px; font-size: 18.5px; color: var(--ink); }
+.chapter p, .chapter ul, .chapter ol { margin: 0 0 12px; max-width: 78ch; }
+.chapter ul, .chapter ol { padding-left: 22px; }
+.chapter li { margin: 4px 0; }
+.chapter li::marker { color: var(--muted); }
+strong { color: var(--ink); }
+
+.ui { display: inline-block; padding: 0 7px; border-radius: 5px; background: var(--soft); border: 1px solid var(--line-strong); color: var(--ink); font-weight: 700; font-size: 0.92em; line-height: 1.5; white-space: nowrap; }
+kbd { display: inline-block; min-width: 1.8em; padding: 0 6px; border: 1px solid var(--line-strong); border-bottom-width: 3px; border-radius: 5px; background: #fff; color: var(--ink); font: 700 0.85em/1.6 var(--font); text-align: center; }
+code { font-family: var(--mono); font-size: 0.92em; background: var(--soft); padding: 1px 5px; border-radius: 4px; }
+
+.note { margin: 16px 0; padding: 14px 18px; border-radius: var(--radius); border-left: 4px solid; max-width: 78ch; }
+.note p:last-child, .note ul:last-child { margin-bottom: 0; }
+.note b.t { display: block; margin-bottom: 4px; color: var(--ink); }
+.tip { background: var(--green-soft); border-color: var(--green); }
+.info { background: var(--blue-soft); border-color: var(--blue); }
+.warn { background: var(--amber-soft); border-color: var(--amber); }
+.danger { background: var(--red-soft); border-color: var(--red); }
+
+.table-wrap { overflow-x: auto; margin: 12px 0 16px; border: 1px solid var(--line); border-radius: var(--radius); }
+table { width: 100%; border-collapse: collapse; font-size: 15px; }
+th, td { text-align: left; vertical-align: top; padding: 9px 12px; border-bottom: 1px solid var(--line); }
+th { background: var(--soft); color: var(--ink); font-size: 14px; white-space: nowrap; }
+tr:last-child td { border-bottom: 0; }
+td:first-child { font-weight: 700; color: var(--ink); }
+td.num { white-space: nowrap; }
+
+figure { margin: 18px 0 20px; }
+figure .shot { position: relative; border: 1px solid var(--line-strong); border-radius: var(--radius); overflow: hidden; background: var(--soft); }
+figcaption { margin-top: 8px; font-size: 14px; color: var(--muted); }
+.pin { position: absolute; transform: translate(-50%, -50%); display: grid; place-items: center; width: 30px; height: 30px; border-radius: 50%; background: var(--amber); color: #2b2005; font-weight: 700; font-size: 15px; border: 2px solid #fff; box-shadow: 0 2px 6px rgba(0, 0, 0, 0.35); }
+.legend { list-style: none; padding: 0 !important; display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px 24px; }
+.legend li { display: grid; grid-template-columns: 30px 1fr; gap: 10px; align-items: start; margin: 0; }
+.legend .pin { position: static; transform: none; width: 26px; height: 26px; font-size: 13px; }
+
+.steps { list-style: none; padding: 0 !important; counter-reset: s; display: grid; gap: 10px; }
+.steps li { counter-increment: s; display: grid; grid-template-columns: 34px 1fr; gap: 12px; align-items: start; margin: 0; padding: 12px 14px; background: var(--soft); border: 1px solid var(--line); border-radius: var(--radius); }
+.steps li::before { content: counter(s); display: grid; place-items: center; width: 30px; height: 30px; border-radius: 50%; background: var(--dark); color: var(--amber); font-weight: 700; }
+
+.cols { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 14px; margin: 12px 0 16px; }
+.card { background: var(--soft); border: 1px solid var(--line); border-radius: var(--radius); padding: 14px 16px; }
+.card h4 { margin: 0 0 6px; font-size: 16px; color: var(--ink); }
+.card p { margin: 0; font-size: 15px; }
+.swatch { display: inline-block; width: 12px; height: 12px; border-radius: 3px; vertical-align: -1px; margin-right: 6px; }
+
+details.faq { border: 1px solid var(--line); border-radius: var(--radius); margin: 10px 0; background: var(--soft); max-width: 78ch; }
+details.faq summary { cursor: pointer; padding: 12px 16px; font-weight: 700; color: var(--ink); list-style-position: inside; }
+details.faq[open] summary { border-bottom: 1px solid var(--line); }
+details.faq > div { padding: 12px 16px 4px; }
+
+dl.gloss { display: grid; grid-template-columns: 190px minmax(0, 1fr); gap: 0; margin: 8px 0 0; border: 1px solid var(--line); border-radius: var(--radius); overflow: hidden; }
+dl.gloss dt, dl.gloss dd { margin: 0; padding: 9px 14px; border-bottom: 1px solid var(--line); }
+dl.gloss dt { font-weight: 700; color: var(--ink); background: var(--soft); }
+dl.gloss dt:last-of-type, dl.gloss dd:last-of-type { border-bottom: 0; }
+
+.no-results { display: none; background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius); padding: 24px 32px; margin-bottom: 24px; }
+.foot { text-align: center; color: var(--muted); font-size: 14px; padding: 8px 0 0; }
+.back-top { display: inline-block; margin-top: 8px; font-size: 14px; }
+
+@media (max-width: 980px) {
+  .layout { grid-template-columns: minmax(0, 1fr); padding-top: 16px; }
+  .toc { display: none; }
+  .toc-mobile { display: block; background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius); margin-bottom: 16px; }
+  .toc-mobile summary { padding: 12px 16px; font-weight: 700; color: var(--ink); cursor: pointer; }
+  .toc-mobile ol { margin: 0; padding: 0 16px 14px 38px; columns: 2; column-gap: 24px; }
+  .toc-mobile li { break-inside: avoid; padding: 3px 0; }
+  .toc-mobile a { color: var(--text); text-decoration: none; }
+  .cols { grid-template-columns: minmax(0, 1fr); }
+}
+@media (max-width: 640px) {
+  .topbar { padding: 10px 14px; gap: 10px; }
+  .topbar .title { display: none; }
+  .btn .long { display: none; }
+  .btn .short { display: inline; }
+  .intro, section.chapter { padding: 20px 18px 22px; }
+  .intro h1 { font-size: 26px; }
+  .chapter > h2 { font-size: 21px; }
+  .legend { grid-template-columns: minmax(0, 1fr); }
+  .toc-mobile ol { columns: 1; }
+  dl.gloss { grid-template-columns: minmax(0, 1fr); }
+  dl.gloss dt { border-bottom: 0; padding-bottom: 2px; }
+  .pin { width: 24px; height: 24px; font-size: 12px; }
+}
+@media print {
+  body { background: #fff; font-size: 11pt; }
+  .topbar, .toc, .toc-mobile, .search, .back-top { display: none !important; }
+  .layout { display: block; padding: 0; }
+  .intro, section.chapter { box-shadow: none; border: 0; padding: 0; margin: 0 0 18pt; }
+  section.chapter { break-before: page; }
+  section.chapter[hidden] { display: block !important; }
+  details.faq > div { display: block; }
+  a { color: inherit; text-decoration: none; }
+}
+</style>
+</head>
+<body>
+
+<header class="topbar">
+  <a class="brand" href="../index.html" aria-label="Syncrofin 3D Planner: voltar à apresentação">
+    <span class="mark" aria-hidden="true"><span></span><span></span><span></span></span>
+    <span>Syncrofin <b>3D</b> Planner</span>
+  </a>
+  <span class="title">Manual do usuário</span>
+  <div class="top-actions">
+    <button class="btn" type="button" id="print" aria-label="Imprimir o manual"><svg width="16" height="16" viewBox="0 0 24 24" aria-hidden="true"><path d="M6 9V3h12v6M6 18H4a1 1 0 0 1-1-1v-6a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2v6a1 1 0 0 1-1 1h-2M6 14h12v7H6z" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"/></svg><span class="long">Imprimir</span></button>
+    <a class="btn primary" href="../index.html" aria-label="Voltar à apresentação"><span class="long">Voltar à apresentação</span><svg class="short" width="16" height="16" viewBox="0 0 24 24" aria-hidden="true"><path d="M9 14 4 9l5-5M4 9h11a5 5 0 0 1 0 10h-3" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/></svg></a>
+  </div>
+</header>
+
+<div class="layout">
+  <nav class="toc" aria-label="Sumário">
+    <h2>Sumário</h2>
+    <ol id="toc-list"></ol>
+  </nav>
+
+  <main class="doc" id="topo">
+    <div class="intro">
+      <h1>Manual do usuário</h1>
+      <p>O Syncrofin 3D Planner monta o plano de carga de vans, caminhões, carretas e contêineres. Você informa os volumes e escolhe o veículo; o sistema posiciona a carga em 3D, confere o peso de cada eixo, calcula a amarração e gera a ordem de carregamento para a doca. Este manual explica cada tela, cada campo e cada cálculo.</p>
+      <div class="search">
+        <input type="search" id="search" placeholder="Buscar no manual (ex.: eixo, cinta, planilha)" aria-label="Buscar no manual">
+        <span id="search-count" role="status"></span>
+      </div>
+    </div>
+
+    <details class="toc-mobile">
+      <summary>Sumário</summary>
+      <ol id="toc-mobile-list"></ol>
+    </details>
+
+    <div class="no-results" id="no-results"><p>Nenhum capítulo contém esse termo. Tente outra palavra, como <em>eixo</em>, <em>cinta</em>, <em>planilha</em> ou <em>PDF</em>.</p></div>
+
+    <!-- 1 -->
+    <section class="chapter" id="visao-geral" data-title="Visão geral">
+      <h2><span class="n">1</span>Visão geral</h2>
+      <p>O planejador resolve, em segundos, três perguntas que toda expedição faz antes de carregar:</p>
+      <div class="cols">
+        <div class="card"><h4>Cabe?</h4><p>Cada volume é posicionado no espaço de carga respeitando medidas, empilhamento, fragilidade e a ordem das entregas.</p></div>
+        <div class="card"><h4>Está dentro do limite?</h4><p>O peso de cada eixo, do pino-rei, dos conjuntos e o peso bruto são conferidos na saída e depois de cada entrega.</p></div>
+        <div class="card"><h4>Como carregar e prender?</h4><p>A ordem de carregamento em PDF numera os volumes do fundo para as portas, e o cálculo de amarração diz quantas cintas usar.</p></div>
+      </div>
+      <h3>O que você precisa</h3>
+      <ul>
+        <li>Um navegador atual (Chrome, Edge, Firefox ou Safari). Não é preciso instalar nada.</li>
+        <li>Para a vista 3D, o ajuste manual e as imagens do PDF, o navegador precisa de <strong>WebGL</strong>, que os navegadores atuais já trazem. Sem WebGL, o sistema mostra um desenho 2D da carga.</li>
+        <li>O sistema funciona com mouse, teclado ou tela de toque, no computador, no tablet ou no celular.</li>
+      </ul>
+      <div class="note info"><b class="t">Onde ficam os seus dados</b><p>A lista de carga, o veículo escolhido, as regras, os espaços personalizados e os favoritos ficam salvos <strong>no próprio navegador</strong> deste computador. Nada é enviado para um servidor. Veja o capítulo <a href="#dados">Dados e privacidade</a>.</p></div>
+    </section>
+
+    <!-- 2 -->
+    <section class="chapter" id="primeiros-passos" data-title="Primeiros passos">
+      <h2><span class="n">2</span>Primeiros passos</h2>
+      <p>O jeito mais rápido de conhecer o sistema é seguir este roteiro com a carga de exemplo:</p>
+      <ol class="steps">
+        <li><span>Clique em <span class="ui">Carga de exemplo</span> na barra superior. A lista recebe 42 volumes de dois clientes e o plano aparece em 3D.</span></li>
+        <li><span>Gire a vista arrastando com o mouse e aproxime com a rodinha. Experimente as vistas <span class="ui">Topo</span>, <span class="ui">Lado</span>, <span class="ui">Esq.</span> e <span class="ui">Dir.</span></span></li>
+        <li><span>Abra a lista de veículos pela seta <span class="ui">▾</span> do painel do espaço de carga (canto superior direito da vista) e escolha outro veículo. O plano é refeito na hora.</span></li>
+        <li><span>Role até <strong>Peso por eixo</strong> e veja a carga em cada eixo, o centro de gravidade e a tabela de uso na saída e após cada entrega.</span></li>
+        <li><span>Clique em <span class="ui">Amarração</span> para ver as cintas desenhadas sobre a carga e o quadro de cintas por seção.</span></li>
+        <li><span>Clique em <span class="ui">Ordem de carregamento (PDF)</span> para gerar o documento da doca.</span></li>
+      </ol>
+      <div class="note warn"><b class="t">Atenção</b><p><span class="ui">Carga de exemplo</span> substitui a lista atual, e <span class="ui">Limpar</span> apaga todos os volumes da lista. Nenhum dos dois pede confirmação.</p></div>
+    </section>
+
+    <!-- 3 -->
+    <section class="chapter" id="tela" data-title="A tela principal">
+      <h2><span class="n">3</span>A tela principal</h2>
+      <p>A aba <span class="ui">Plano de carga</span> reúne tudo o que é preciso para montar e conferir um carregamento.</p>
+      <figure>
+        <div class="shot">
+          <img src="img/tela-principal.jpg" width="1900" height="1030" alt="Tela principal do planejador com a lista de carga à esquerda, a vista 3D de um semirreboque no centro e o painel de peso por eixo abaixo.">
+          <span class="pin" style="left:62%; top:3.2%">1</span>
+          <span class="pin" style="left:9%; top:24%">2</span>
+          <span class="pin" style="left:27%; top:9.4%">3</span>
+          <span class="pin" style="left:44%; top:28%">4</span>
+          <span class="pin" style="left:79%; top:14%">5</span>
+          <span class="pin" style="left:20%; top:51.5%">6</span>
+          <span class="pin" style="left:20%; top:62%">7</span>
+        </div>
+        <figcaption>Plano de carga com a carga de exemplo num semirreboque de 13,6 m.</figcaption>
+      </figure>
+      <ul class="legend">
+        <li><span class="pin">1</span><span><strong>Barra superior.</strong> Abas <span class="ui">Plano de carga</span> e <span class="ui">Espaços de carga</span>, e os botões <span class="ui">Importar planilha</span>, <span class="ui">Carga de exemplo</span>, <span class="ui">Limpar</span>, <span class="ui">Carregar</span> e <span class="ui">?</span> (este manual).</span></li>
+        <li><span class="pin">2</span><span><strong>Painel Carga.</strong> Formulário para adicionar volumes, regras do plano, modo de planejamento e a lista de carga.</span></li>
+        <li><span class="pin">3</span><span><strong>Barra da vista.</strong> Vistas (3D, Topo, Lado, Esq., Dir.), modo <span class="ui">Automático</span>/<span class="ui">Manual</span>, <span class="ui">Amarração</span> e os indicadores de ocupação.</span></li>
+        <li><span class="pin">4</span><span><strong>Vista da carga.</strong> O veículo e os volumes em 3D. Arraste para girar; use a rodinha ou dois dedos para aproximar.</span></li>
+        <li><span class="pin">5</span><span><strong>Painel do espaço.</strong> Veículo escolhido, medidas internas, capacidade e o que a carga pede. A seta <span class="ui">▾</span> abre a lista de veículos.</span></li>
+        <li><span class="pin">6</span><span><strong>Resumo do plano.</strong> Mensagem com o resultado, medidas do veículo e os botões <span class="ui">Comparar veículos</span>, <span class="ui">Ordem de carregamento (PDF)</span> e <span class="ui">Relatório</span>.</span></li>
+        <li><span class="pin">7</span><span><strong>Peso por eixo.</strong> Vista lateral com a carga em cada eixo, o centro de gravidade, os avisos e a tabela por entrega.</span></li>
+      </ul>
+      <h3>Botões da barra superior</h3>
+      <div class="table-wrap"><table>
+        <thead><tr><th>Botão</th><th>O que faz</th></tr></thead>
+        <tbody>
+          <tr><td>Importar planilha</td><td>Lê um arquivo Excel (.xlsx) ou CSV e acrescenta os volumes à lista. Veja <a href="#importar">Importar planilha</a>.</td></tr>
+          <tr><td>Carga de exemplo</td><td>Troca a lista atual por uma carga de demonstração com 42 volumes e dois clientes.</td></tr>
+          <tr><td>Limpar</td><td>Tira todos os volumes da lista.</td></tr>
+          <tr><td>Carregar</td><td>Refaz o plano com a lista atual. No modo Manual, encaixa os volumes que ficaram de fora sem mexer nos já posicionados.</td></tr>
+          <tr><td>?</td><td>Abre este manual (no planejador, numa nova aba). Atalho: <kbd>F1</kbd>.</td></tr>
+        </tbody>
+      </table></div>
+      <p>No celular, os botões de ação ficam recolhidos no botão de menu (<span class="ui">☰</span>) ao lado da marca.</p>
+    </section>
+
+    <!-- 4 -->
+    <section class="chapter" id="lista" data-title="Lista de carga">
+      <h2><span class="n">4</span>Lista de carga</h2>
+      <p>Cada linha da lista é um <strong>item</strong>: um tipo de volume com as suas medidas e a quantidade de unidades iguais. Preencha o formulário no painel <strong>Carga</strong> e clique em <span class="ui">Adicionar item</span> (ou tecle <kbd>Enter</kbd>).</p>
+      <h3>Campos do formulário</h3>
+      <div class="table-wrap"><table>
+        <thead><tr><th>Campo</th><th>O que informar</th><th>Limites</th></tr></thead>
+        <tbody>
+          <tr><td>Descrição</td><td>Nome do volume. É impresso na caixa em 3D e no PDF.</td><td class="num">até 28 caracteres</td></tr>
+          <tr><td>Destino</td><td>Cliente ou parada de entrega. Volumes com o mesmo destino formam um grupo, usado nos modos <em>Por cliente</em> e <em>Por itinerário</em>.</td><td class="num">até 40 caracteres</td></tr>
+          <tr><td>Comp. mm</td><td>Comprimento do volume, em milímetros.</td><td class="num">50 a 20.000</td></tr>
+          <tr><td>Larg. mm</td><td>Largura do volume, em milímetros.</td><td class="num">50 a 3.000</td></tr>
+          <tr><td>Alt. mm</td><td>Altura do volume, em milímetros.</td><td class="num">20 a 4.000</td></tr>
+          <tr><td>Peso kg</td><td>Peso de <strong>uma</strong> unidade, em quilos.</td><td class="num">0 a 30.000</td></tr>
+          <tr><td>Unidades</td><td>Quantas unidades iguais desse volume.</td><td class="num">1 a 500</td></tr>
+          <tr><td>Cor</td><td>Cor da caixa na vista 3D, nos desenhos e no PDF. Ajuda a reconhecer o item.</td><td class="num">22 cores</td></tr>
+          <tr><td>Posição</td><td><strong>Em pé</strong>: este lado para cima; o volume só gira no plano do chão. <strong>Deitar</strong>: qualquer face pode ficar para baixo.</td><td class="num">em pé / deitar</td></tr>
+          <tr><td>Em cima kg</td><td>Peso máximo que o volume aguenta em cima, somado pela pilha inteira. Vazio = sem limite; <strong>0 = não empilhar</strong>.</td><td class="num">0 a 100.000</td></tr>
+          <tr><td>Frágil</td><td>Marcado, nada é colocado em cima desse volume.</td><td class="num">sim / não</td></tr>
+        </tbody>
+      </table></div>
+      <h3>Trabalhar com a lista</h3>
+      <ul>
+        <li><strong>Selecionar:</strong> clique num item para destacá-lo na vista. Clique de novo, ou tecle <kbd>Esc</kbd>, para tirar o destaque.</li>
+        <li><strong>Remover:</strong> clique no <span class="ui">×</span> à direita do item.</li>
+        <li><strong>Grupos:</strong> com mais de um destino, a lista aparece agrupada. No modo <em>Por itinerário</em> cada grupo vira "Entrega 1, 2…", com as setas <span class="ui">↑</span> e <span class="ui">↓</span> para mudar a ordem; no modo <em>Por cliente</em>, "Bloco 1 (frente), Bloco 2…".</li>
+        <li><strong>Sem lugar:</strong> quando um item mostra o selo vermelho <em>"N sem lugar"</em>, N unidades não couberam. O resumo do plano diz o motivo: peso, eixo, regras ou falta de espaço.</li>
+      </ul>
+      <figure>
+        <div class="shot"><img src="img/sem-lugar.jpg" width="1905" height="1044" loading="lazy" alt="Minifurgão com apenas 5 de 42 volumes colocados; os itens da lista mostram selos vermelhos de volumes sem lugar."></div>
+        <figcaption>Num minifurgão de 650 kg, 37 volumes ficam de fora por excesso de peso. Os selos vermelhos na lista mostram quantos de cada item.</figcaption>
+      </figure>
+      <div class="note tip"><b class="t">Dica</b><p>O contador ao lado do título <strong>Carga</strong> mostra o total de volumes (soma das unidades de todos os itens).</p></div>
+    </section>
+
+    <!-- 5 -->
+    <section class="chapter" id="importar" data-title="Importar planilha">
+      <h2><span class="n">5</span>Importar planilha</h2>
+      <p>O botão <span class="ui">Importar planilha</span> lê um arquivo <strong>Excel (.xlsx)</strong> ou <strong>CSV</strong> e <strong>acrescenta</strong> os volumes à lista atual. O link <span class="ui">Baixar modelo CSV</span>, abaixo do formulário, baixa um modelo pronto para preencher.</p>
+      <h3>Colunas reconhecidas</h3>
+      <p>As colunas são encontradas pelo cabeçalho, com ou sem acentos, em português ou inglês. Sem cabeçalho, o sistema espera exatamente esta ordem:</p>
+      <div class="table-wrap"><table>
+        <thead><tr><th>Coluna</th><th>Conteúdo</th><th>Obrigatória</th></tr></thead>
+        <tbody>
+          <tr><td>Descrição</td><td>Nome do volume</td><td>sim</td></tr>
+          <tr><td>Comprimento</td><td>Em mm (ou cm/m, se o cabeçalho disser)</td><td>sim</td></tr>
+          <tr><td>Largura</td><td>Em mm (ou cm/m)</td><td>sim</td></tr>
+          <tr><td>Altura</td><td>Em mm (ou cm/m)</td><td>sim</td></tr>
+          <tr><td>Peso</td><td>Em kg por unidade</td><td>sim</td></tr>
+          <tr><td>Quantidade</td><td>Número de unidades</td><td>sim</td></tr>
+          <tr><td>Destino</td><td>Cliente ou parada</td><td>não</td></tr>
+          <tr><td>Cor</td><td>Nome da cor</td><td>não</td></tr>
+          <tr><td>Pode deitar</td><td>Sim / Não</td><td>não</td></tr>
+          <tr><td>Frágil</td><td>Sim / Não</td><td>não</td></tr>
+          <tr><td>Peso máx. em cima (kg)</td><td>Vazio = sem limite; 0 = não empilhar</td><td>não</td></tr>
+        </tbody>
+      </table></div>
+      <h3>Regras de leitura</h3>
+      <ul>
+        <li><strong>Unidades:</strong> as medidas são em milímetros, a menos que o cabeçalho diga <code>(cm)</code> ou <code>(m)</code>. Um cabeçalho <em>"Peso total"</em> é dividido pela quantidade.</li>
+        <li><strong>CSV:</strong> aceita <code>;</code>, <code>,</code> ou tabulação como separador, vírgula decimal, e arquivos em UTF-8 ou Windows-1252 (o formato que o Excel usa no Brasil).</li>
+        <li><strong>Excel:</strong> só a primeira aba é lida. Arquivos <code>.xls</code> antigos não são aceitos: salve como <code>.xlsx</code> ou <code>.csv</code>.</li>
+        <li><strong>Cores:</strong> 22 cores (Azul, Amarelo, Verde, Laranja, Cinza, Vermelho, Rosa, Roxo, Lilás, Azul-escuro, Verde-água, Ciano, Verde-limão, Verde-escuro, Oliva, Marrom, Bege, Salmão, Dourado, Vinho, Grafite e Branco), também em inglês e com variações como "azul marinho", "turquesa", "bordô" e "preto". Linhas sem cor recebem as cores em sequência.</li>
+        <li><strong>Linhas inválidas</strong> (sem medidas, ou que não cabem no veículo escolhido) são ignoradas, e a mensagem informa o número de cada uma.</li>
+      </ul>
+      <div class="note tip"><b class="t">Exemplo de CSV</b><p><code>Descrição;Comprimento;Largura;Altura;Peso;Quantidade;Destino;Cor;Frágil</code><br><code>Palete EUR;1200;800;1450;420;12;FruitPlanet Corp;Azul;Não</code><br><code>Caixa pequena;600;400;400;35;20;Grupo 1;Verde;Sim</code></p></div>
+    </section>
+
+    <!-- 6 -->
+    <section class="chapter" id="espacos" data-title="Espaços de carga">
+      <h2><span class="n">6</span>Espaços de carga</h2>
+      <p>O <strong>espaço de carga</strong> é o veículo ou contêiner onde a carga é posicionada: baú, sider, plataforma, contêiner, van ou furgão. As medidas usadas são sempre as <strong>internas</strong>.</p>
+      <h3>Escolher o veículo</h3>
+      <ul>
+        <li>No painel do espaço (canto superior direito da vista), clique na seta <span class="ui">▾</span> para abrir a lista de espaços de carga.</li>
+        <li>O botão de funil filtra por tipo (contêineres, vans e furgões, caminhões, reboques); a estrela mostra só os favoritos. Marque um favorito clicando na <span class="ui">★</span> do veículo.</li>
+        <li>Ao escolher um <strong>semirreboque</strong>, aparece a lista de <strong>cavalos mecânicos</strong>. Com cavalo, a carga no pino-rei é repartida pelos eixos do cavalo; com <em>Sem cavalo</em>, só a carga no pino-rei é calculada.</li>
+      </ul>
+      <figure>
+        <div class="shot"><img src="img/lista-espacos.jpg" width="1916" height="1036" loading="lazy" alt="Lista de espaços de carga aberta à direita da vista, com o semirreboque escolhido e a lista de cavalos mecânicos."></div>
+        <figcaption>Lista de espaços de carga com os cavalos mecânicos do semirreboque.</figcaption>
+      </figure>
+      <h3>Painel do espaço</h3>
+      <p>Mostra o nome e as medidas internas do veículo. A primeira linha traz a <strong>capacidade</strong> (peso, volume e metros livres); a segunda, o que a <strong>lista de carga pede</strong>. O valor fica em <span style="color:var(--red); font-weight:700">vermelho</span> quando a carga passa da capacidade.</p>
+      <h3>Aba Espaços de carga</h3>
+      <p>Tabela com todos os espaços de carga e cavalos, com filtros por favorito, nome, tipo, origem e data de criação, ordenação clicando no título da coluna e paginação.</p>
+      <ul>
+        <li>Os espaços <strong>padrão</strong> (24, do minifurgão ao contêiner 40 pés High Cube) podem ser editados e depois restaurados aos valores originais.</li>
+        <li>Os espaços <strong>personalizados</strong> podem ser editados e apagados.</li>
+      </ul>
+      <figure>
+        <div class="shot"><img src="img/catalogo.jpg" width="1919" height="1077" loading="lazy" alt="Aba Espaços de carga com a tabela de veículos, filtros e paginação."></div>
+        <figcaption>Catálogo de espaços de carga, com filtros e ordenação por coluna.</figcaption>
+      </figure>
+      <h3 id="comparar">Comparar veículos e escolher o melhor</h3>
+      <p>O botão <span class="ui">Comparar veículos</span>, ao lado de <span class="ui">Ordem de carregamento (PDF)</span>, planeja a lista de carga atual em <strong>cada espaço de carga do catálogo</strong>, um depois do outro, e indica o mais adequado.</p>
+      <ul>
+        <li>Cada veículo recebe a mesma lista, no mesmo modo de planejamento e com as mesmas regras, numa busca curta (até 0,4 s por veículo). A barra de progresso mostra quantos já foram planejados.</li>
+        <li>A tabela traz, para cada veículo, o volume, o peso e o chão ocupados, o metro linear e quantos volumes couberam. O veículo do plano aparece marcado <em>no plano</em>.</li>
+        <li><strong>Recomendado</strong> é o veículo que leva <strong>todos os volumes</strong> sem passar de nenhum limite de peso ou de eixo e, entre esses, o que usa a <strong>maior parte da carga útil ou do volume</strong>: o menor veículo que dá conta da carga. Veículos sem avisos de distribuição vêm antes dos que têm avisos.</li>
+        <li>Os que não levam tudo vêm no fim da lista, com o número de volumes que couberam em vermelho.</li>
+        <li>A comparação abre numa janela sobre o planejador, com duas saídas:
+          <ul>
+            <li>o botão amarelo <span class="ui">Usar este veículo</span> troca o veículo e volta ao planejador já com o modelo sugerido (o <span class="ui">Usar</span> de cada linha faz o mesmo com aquele veículo);</li>
+            <li><span class="ui">Cancelar</span> volta ao planejador sem mudar nada, para o operador escolher. <kbd>Esc</kbd>, o <span class="ui">×</span> ou um clique fora da janela também cancelam.</li>
+          </ul>
+        </li>
+        <li>Marque <span class="ui">Só os favoritos</span> para comparar apenas os veículos marcados com <span class="ui">★</span>, por exemplo a sua frota.</li>
+        <li>Se a lista, o modo ou as regras mudarem, o painel avisa; clique em <span class="ui">Comparar de novo</span>.</li>
+        <li>Os semirreboques são comparados com o cavalo mecânico escolhido no plano.</li>
+      </ul>
+      <figure>
+        <div class="shot"><img src="img/comparar-veiculos.jpg" width="1120" height="852" loading="lazy" alt="Janela Comparar veículos sobre o planejador, com a recomendação do caminhão rígido 18 t, os botões Usar este veículo e Cancelar, e a tabela de veículos com volume, peso, chão, metro linear e volumes colocados."></div>
+        <figcaption>Com a carga de exemplo (42 volumes, 7.420 kg), o recomendado é o caminhão rígido 18 t: leva tudo usando 78% da carga útil e 95% do chão.</figcaption>
+      </figure>
+      <div class="note tip"><b class="t">Dica</b><p>A comparação usa uma busca curta para ser rápida. Depois de escolher o veículo, o plano principal faz a busca completa e pode encontrar um arranjo ainda melhor.</p></div>
+
+      <h3>Cadastrar a sua frota</h3>
+      <p>Clique em <span class="ui">+ Criar espaço de carga personalizado</span> (na aba) ou <span class="ui">+ Criar espaço de carga</span> (no fim da lista lateral) e preencha:</p>
+      <div class="table-wrap"><table>
+        <thead><tr><th>Campo</th><th>Descrição</th></tr></thead>
+        <tbody>
+          <tr><td>Nome</td><td>Como o veículo aparece nas listas e no PDF.</td></tr>
+          <tr><td>Tipo</td><td>19 tipos, entre eles van/furgão, caminhão rígido, bitruck de 4 eixos, reboques de 3 e 4 eixos, semirreboques, plataforma, contêiner e cavalos mecânicos (inclusive 4 eixos em 2 + 2 e 1 + 3). O tipo define quantos eixos o veículo tem.</td></tr>
+          <tr><td>Comprimento, largura, altura</td><td>Medidas <strong>internas</strong> do espaço de carga, em mm.</td></tr>
+          <tr><td>Carga máx. do espaço</td><td>Carga útil máxima, em kg.</td></tr>
+          <tr><td>Bitola</td><td>Distância entre os centros das rodas de um eixo, em mm. Usada para repartir o peso entre rodas esquerdas e direitas.</td></tr>
+          <tr><td>Peso bruto máx. (PBT)</td><td>Opcional. Carga mais as taras de todos os eixos. No semirreboque vale como PBTC da combinação; no cavalo, como CMT/PBTC. Vazio = sem limite.</td></tr>
+          <tr><td>Eixos A a E</td><td>Para cada eixo: <strong>distância</strong>, <strong>tara</strong> e <strong>carga máxima</strong>.</td></tr>
+          <tr><td>Limites dos conjuntos</td><td>Opcionais: carga máxima do conjunto dianteiro e do traseiro (quando têm mais de um eixo) e a <strong>repartição</strong> de cada eixo no conjunto, em %. Vazio = partes iguais; preenchida, precisa somar 100%.</td></tr>
+        </tbody>
+      </table></div>
+      <div class="note warn"><b class="t">Como medir a distância dos eixos</b>
+        <ul>
+          <li>O <strong>0</strong> é a parede da frente do espaço de carga (o baú). Nos cavalos mecânicos, o 0 é o <strong>prato</strong>.</li>
+          <li>Eixos à frente do baú têm distância <strong>negativa</strong>. Exemplo: eixo dianteiro 1.300 mm à frente do baú = <code>-1300</code>; eixo traseiro 5.000 mm atrás da parede da frente = <code>5000</code>.</li>
+          <li>Um erro nas medidas muda todo o cálculo de eixos. Confira com o documento do veículo.</li>
+        </ul>
+      </div>
+      <figure>
+        <div class="shot"><img src="img/cadastro-espaco.jpg" width="1898" height="1029" loading="lazy" alt="Formulário de edição de espaço de carga com a vista lateral em escala de um furgão e as cotas A e B dos eixos."></div>
+        <figcaption>A vista lateral em escala acompanha os valores enquanto você digita. Um eixo em posição impossível fica vermelho, com o motivo logo abaixo do desenho.</figcaption>
+      </figure>
+      <p>No bitruck e no cavalo 8×4 (2 + 2), os eixos A e B formam o par dianteiro direcional, que divide a carga como o grupo traseiro. No cavalo 1 + 3, B, C e D formam o grupo traseiro. O catálogo já traz os limites usuais: conjunto duplo 17.000 kg, triplo 25.500 kg e o PBT dos caminhões rígidos.</p>
+      <div class="note info"><p>As medidas, taras e limites das vans e furgões do catálogo são típicos da categoria. Confira com o documento do seu veículo e ajuste no cadastro.</p></div>
+    </section>
+
+    <!-- 7 -->
+    <section class="chapter" id="otimizacao" data-title="Como o plano é montado">
+      <h2><span class="n">7</span>Como o plano é montado</h2>
+      <p>No modo <span class="ui">Automático</span>, o plano é refeito sempre que a lista, o veículo ou as regras mudam. O trabalho tem três partes.</p>
+      <h3>1. Arranjo</h3>
+      <p>Cada volume vai para a posição <strong>mais à frente, mais baixa</strong> e que deixa a carga <strong>mais equilibrada</strong> entre esquerda e direita. Os cantos do fundo também são testados, para quando os eixos pedem a carga mais para trás. Em cada posição, o sistema confere:</p>
+      <ul>
+        <li>o volume cabe e não sobrepõe outro;</li>
+        <li>a base tem o <strong>apoio mínimo</strong> (padrão 80%);</li>
+        <li>as rotações são permitidas: <em>em pé</em> só gira no plano do chão; <em>deitar</em> permite as 6 posições;</li>
+        <li>nada vai em cima de volume <strong>frágil</strong>;</li>
+        <li>o <strong>peso máximo em cima</strong> de cada volume, somado pela pilha inteira;</li>
+        <li>a <strong>ordem de descarga</strong>: um volume não fica entre outro que sai antes e as portas, nem em cima dele;</li>
+        <li>o <strong>peso por eixo</strong>: nenhum eixo, conjunto, prato ou o peso bruto passa do limite.</li>
+      </ul>
+      <h3>2. Verificação</h3>
+      <p>O peso em cada apoio é calculado pelo equilíbrio de momentos a partir do centro de gravidade de cada volume, na saída e de novo depois de cada entrega. O sistema avisa sobre limites (eixo, conjunto, pino-rei, peso bruto e eixo que levanta) e sobre a distribuição (desbalanceamento lateral, pouca carga no eixo dianteiro ou no de tração).</p>
+      <h3>3. Busca do melhor plano</h3>
+      <ul>
+        <li>O primeiro plano aparece na hora.</li>
+        <li>Em seguida, o sistema refaz a montagem com ordens de volumes sorteadas, dentro do <strong>tempo de otimização</strong> (padrão 2 s, até 3.000 tentativas), e fica com o plano de melhor pontuação: mais volume carregado, menos excesso nos eixos e menos avisos.</li>
+        <li>A mesma lista sempre dá o mesmo plano.</li>
+        <li>Qualquer edição interrompe a busca e começa outra.</li>
+        <li>Se ainda sobrar um problema de eixo, a carga inteira pode recuar no baú; sem problema, ela fica encostada na parede da frente.</li>
+      </ul>
+      <p>A mensagem do resumo mostra o resultado, por exemplo: <em>"Tudo colocado: 42 volumes, 26,4 m³ de carga. Otimizado: 2747 tentativas em 2,0 s."</em></p>
+    </section>
+
+    <!-- 8 -->
+    <section class="chapter" id="modos" data-title="Modos de planejamento">
+      <h2><span class="n">8</span>Modos de planejamento</h2>
+      <p>Em <strong>Planejar a carga</strong>, no painel à esquerda, você escolhe como o <strong>destino</strong> de cada volume entra no plano. O modo fica salvo com o plano.</p>
+      <div class="cols">
+        <div class="card"><h4>Normal</h4><p>O destino é ignorado. Todos os volumes se misturam em busca do melhor aproveitamento de espaço e peso. Eixos verificados na saída.</p></div>
+        <div class="card"><h4>Por cliente</h4><p>A carga de cada cliente forma um bloco, sem volume de outro cliente na frente (do lado das portas) nem em cima. O sistema testa várias ordens de blocos e escolhe a melhor. Eixos verificados na saída.</p></div>
+        <div class="card"><h4>Por itinerário <small>(padrão)</small></h4><p>Segue a ordem das entregas: a última entrega é carregada primeiro e vai para a frente. Eixos verificados na saída e depois de cada entrega.</p></div>
+      </div>
+      <h3>Ordem das entregas</h3>
+      <p>No modo <em>Por itinerário</em>, os destinos da lista são as paradas, na ordem mostrada ("Entrega 1, 2…"). Use <span class="ui">↑</span> (entregar antes) e <span class="ui">↓</span> (entregar depois) no título de cada grupo para mudar a ordem. Ao empurrar volumes para trás por causa dos eixos, o sistema reserva no fundo o comprimento de que as entregas anteriores precisam.</p>
+      <figure>
+        <div class="shot"><img src="img/itinerario.jpg" width="1909" height="1078" loading="lazy" alt="Caminhão rígido 26 t no modo por itinerário, com a lista agrupada em Entrega 1 e Entrega 2 e as setas para mudar a ordem."></div>
+        <figcaption>Modo por itinerário: a lista agrupada por entrega, com as setas para mudar a ordem.</figcaption>
+      </figure>
+    </section>
+
+    <!-- 9 -->
+    <section class="chapter" id="regras" data-title="Regras do plano">
+      <h2><span class="n">9</span>Regras do plano</h2>
+      <p>Clique em <span class="ui">Regras do plano</span>, no painel à esquerda, para ajustar os critérios que valem para toda a carga:</p>
+      <div class="table-wrap"><table>
+        <thead><tr><th>Regra</th><th>Padrão</th><th>Faixa</th><th>Significado</th></tr></thead>
+        <tbody>
+          <tr><td>Apoio mínimo da base</td><td class="num">80%</td><td class="num">50 a 100%</td><td>Quanto da base de um volume precisa estar apoiada no piso ou em outros volumes.</td></tr>
+          <tr><td>Desbalanceamento lateral máx.</td><td class="num">10%</td><td class="num">1 a 50%</td><td>Conta a partir de 50/50: 10% permite até 60% do peso de um lado.</td></tr>
+          <tr><td>Carga mín. no eixo dianteiro</td><td class="num">20%</td><td class="num">0 a 60%</td><td>Parte do peso do caminhão (ou do cavalo) que precisa ficar sobre os eixos da frente, para a direção não ficar leve.</td></tr>
+          <tr><td>Carga mín. no eixo de tração</td><td class="num">20%</td><td class="num">0 a 60%</td><td>Parte do peso bruto total sobre o eixo de tração, para manter a aderência.</td></tr>
+          <tr><td>Tempo de otimização</td><td class="num">2 s</td><td class="num">0 a 30 s</td><td>Quanto tempo o sistema procura planos melhores. Mais tempo pode achar planos melhores em cargas grandes.</td></tr>
+        </tbody>
+      </table></div>
+      <p>As regras de cada volume (posição, peso máximo em cima e frágil) ficam no formulário do item. Veja <a href="#lista">Lista de carga</a>.</p>
+    </section>
+
+    <!-- 10 -->
+    <section class="chapter" id="vistas" data-title="Vistas e indicadores">
+      <h2><span class="n">10</span>Vistas e indicadores</h2>
+      <h3>Vistas</h3>
+      <div class="table-wrap"><table>
+        <thead><tr><th>Botão</th><th>Mostra</th></tr></thead>
+        <tbody>
+          <tr><td>3D</td><td>O veículo e a carga em perspectiva. Arraste para girar; rodinha do mouse ou dois dedos para aproximar.</td></tr>
+          <tr><td>Topo</td><td>A planta: a carga vista de cima.</td></tr>
+          <tr><td>Lado</td><td>A carga vista de lado, como no corte lateral do baú.</td></tr>
+          <tr><td>Esq. / Dir.</td><td>As laterais esquerda e direita do veículo.</td></tr>
+        </tbody>
+      </table></div>
+      <p>Na vista 3D, as caixas trazem o nome do item impresso e o símbolo "este lado para cima". O veículo é montado com os dados do espaço de carga: rodas nas posições dos eixos e na bitola, cabine, cavalo com prato, pés de apoio do semirreboque e cambão do reboque.</p>
+      <h3>Indicadores de ocupação</h3>
+      <div class="table-wrap"><table>
+        <thead><tr><th>Indicador</th><th>O que mede</th></tr></thead>
+        <tbody>
+          <tr><td><span class="swatch" style="background:var(--blue)"></span>Volume</td><td>Quanto do volume interno do espaço de carga está ocupado pela carga colocada.</td></tr>
+          <tr><td><span class="swatch" style="background:var(--amber)"></span>Peso</td><td>Quanto da carga máxima do espaço está sendo usado.</td></tr>
+          <tr><td><span class="swatch" style="background:var(--green)"></span>Chão</td><td>Quanto da área do piso está coberto por volumes.</td></tr>
+          <tr><td><span class="swatch" style="background:var(--blue)"></span>Linear</td><td>Comprimento do piso ocupado, em metros (metro linear).</td></tr>
+        </tbody>
+      </table></div>
+      <div class="note tip"><b class="t">Escolhendo o veículo pelo indicador</b><p>Peso perto de 100% com volume baixo indica carga densa: o limite é o peso. Chão alto com volume baixo indica carga que não empilha. Para ver os indicadores de todos os veículos de uma vez, use <a href="#comparar">Comparar veículos</a>.</p></div>
+    </section>
+
+    <!-- 11 -->
+    <section class="chapter" id="manual" data-title="Ajuste manual">
+      <h2><span class="n">11</span>Ajuste manual</h2>
+      <p>O otimizador sugere o plano, mas o operador pode ajustá-lo. Os botões <span class="ui">Automático</span> e <span class="ui">Manual</span> ficam na barra da vista.</p>
+      <ul>
+        <li><strong>Automático</strong> (padrão): o planejador arruma a carga e busca planos melhores a cada mudança.</li>
+        <li><strong>Manual:</strong> o plano fica como está e o operador move os volumes.</li>
+      </ul>
+      <h3>Mover com o mouse ou o dedo</h3>
+      <ul>
+        <li>Arraste um volume na vista 3D. Uma prévia <span style="color:var(--green-ink); font-weight:700">verde</span> mostra onde ele vai ficar; <span style="color:var(--red); font-weight:700">vermelha</span> quando não cabe (passaria do teto).</li>
+        <li>Ao soltar, o volume desliza no piso, encosta numa parede ou num volume vizinho quando chega a menos de 6 cm, e assenta pela gravidade, no piso ou sobre os volumes embaixo. O que estava em cima dele desce.</li>
+        <li>Arrastar o fundo, fora dos volumes, continua girando a vista.</li>
+      </ul>
+      <h3>Mover pelo teclado</h3>
+      <div class="table-wrap"><table>
+        <thead><tr><th>Tecla</th><th>Ação</th></tr></thead>
+        <tbody>
+          <tr><td>Clique no volume</td><td>Seleciona o volume (contorno âmbar).</td></tr>
+          <tr><td><kbd>←</kbd> <kbd>→</kbd> <kbd>↑</kbd> <kbd>↓</kbd></td><td>Move o volume selecionado 100 mm.</td></tr>
+          <tr><td><kbd>Shift</kbd> + setas</td><td>Move 10 mm, para o ajuste fino.</td></tr>
+          <tr><td><kbd>R</kbd></td><td>Gira o volume 90°.</td></tr>
+          <tr><td><kbd>Esc</kbd></td><td>Tira a seleção.</td></tr>
+        </tbody>
+      </table></div>
+      <h3>O que o sistema continua conferindo</h3>
+      <ul>
+        <li>Posições feitas à mão nunca deixam volumes sobrepostos ou fora do baú.</li>
+        <li>Os eixos são recalculados a cada movimento.</li>
+        <li>O que quebra uma regra do plano é mostrado como <strong>aviso</strong>, e não recusado: base pouco apoiada, carga sobre um frágil, peso acima do limite "em cima", volume no caminho de uma entrega anterior ou misturado com o bloco de outro cliente. A decisão fica com o operador.</li>
+      </ul>
+      <h3>Lista no modo manual</h3>
+      <p>Ao acrescentar ou tirar itens, trocar o veículo ou as regras, os volumes já posicionados ficam onde estão e os que faltam são encaixados no espaço livre em volta deles. <span class="ui">Carregar</span> faz o mesmo com os volumes que ficaram de fora.</p>
+      <div class="note warn"><b class="t">Voltar ao automático</b><p>Clicar em <span class="ui">Automático</span> refaz o plano e descarta os ajustes manuais. Se houve ajustes, o sistema pede confirmação. O modo e as posições manuais ficam salvos com o plano. O ajuste manual precisa da vista 3D (WebGL).</p></div>
+    </section>
+
+    <!-- 12 -->
+    <section class="chapter" id="eixos" data-title="Peso por eixo">
+      <h2><span class="n">12</span>Peso por eixo</h2>
+      <p>O painel <strong>Peso por eixo</strong>, abaixo da vista, mostra o veículo de lado com a carga à vista. Para veículos sem eixos próprios, como o contêiner, ele explica que é preciso escolher um caminhão, reboque ou semirreboque.</p>
+      <figure>
+        <div class="shot"><img src="img/peso-por-eixo.jpg" width="1570" height="671" loading="lazy" alt="Painel de peso por eixo de um semirreboque com cavalo, com setas verdes sobre os eixos, a seta azul do centro de gravidade e a tabela por entrega."></div>
+        <figcaption>Peso por eixo de um semirreboque com cavalo 4×2: todos os eixos dentro do limite na saída e após a entrega 1.</figcaption>
+      </figure>
+      <h3>Como ler o diagrama</h3>
+      <ul>
+        <li>Uma seta grande desce sobre cada eixo. O <strong>comprimento</strong> é a fração do limite usada; a <strong>cor</strong> é o estado: <span style="color:var(--green-ink); font-weight:700">verde</span> (folgado), <span style="color:var(--amber-2); font-weight:700">amarelo</span> (perto do limite) ou <span style="color:var(--red); font-weight:700">vermelho</span> (acima do limite).</li>
+        <li>A carga em kg aparece sob cada roda. Em telas estreitas, os valores passam a toneladas.</li>
+        <li>A seta azul fina marca o <strong>centro de gravidade</strong> (CG) da carga.</li>
+      </ul>
+      <h3>Cartões e tabela</h3>
+      <ul>
+        <li>Cada eixo mostra a carga mais a tara, a carga máxima e a divisão entre rodas esquerdas (E) e direitas (D), calculada pela bitola e pelo desvio lateral do centro de gravidade.</li>
+        <li>Os conjuntos de eixos aparecem com a sua carga e o seu limite. No semirreboque com cavalo, o pino-rei aparece apoiado no cavalo.</li>
+        <li>A linha de baixo traz o centro de gravidade, o desvio lateral, a divisão esquerda/direita e o peso bruto.</li>
+        <li>No modo <em>Por itinerário</em>, a tabela <strong>Uso de cada eixo na saída e depois de cada entrega</strong> mostra o percentual de cada eixo em cada momento da viagem. Um eixo pode ficar acima do limite <em>depois</em> de uma entrega, mesmo estando bem na saída.</li>
+      </ul>
+      <div class="note danger"><b class="t">Quando aparece um problema</b><p>A lista de problemas abaixo do diagrama explica o que passou do limite e em que momento. Tente outro veículo, mude a ordem das entregas, reduza a carga ou, no modo Manual, desloque volumes pesados na direção do eixo com folga.</p></div>
+    </section>
+
+    <!-- 13 -->
+    <section class="chapter" id="amarracao" data-title="Amarração">
+      <h2><span class="n">13</span>Amarração</h2>
+      <p>O botão <span class="ui">Amarração</span>, na barra da vista, calcula as cintas que a carga planejada precisa, desenha as cintas em 3D sobre a carga e abre o painel de amarração. Cada cinta, em laranja, sai de um ponto de amarração no piso, passa pelas quinas superiores dos volumes, como uma cinta esticada, e desce até o piso do outro lado, onde fica a catraca. Com ele ligado, a ordem de carregamento em PDF ganha a página <strong>Plano de amarração</strong>.</p>
+      <figure>
+        <div class="shot"><img src="img/amarracao.jpg" width="1917" height="1075" loading="lazy" alt="Caminhão rígido 18 t com as cintas de amarração em laranja sobre a carga e o painel de amarração com a recomendação, as opções comparadas e a tabela de cintas por seção."></div>
+        <figcaption>Rígido 18 t: 8 cintas em 4 seções com tapete antiderrapante, contra 9 no piso comum.</figcaption>
+      </figure>
+      <h3>Campos do painel</h3>
+      <div class="table-wrap"><table>
+        <thead><tr><th>Campo</th><th>Descrição</th></tr></thead>
+        <tbody>
+          <tr><td>Cinta (STF)</td><td>Força de tensão da cinta, em daN, como está na etiqueta. Padrão 400 daN; faixa de 100 a 2.000 daN.</td></tr>
+          <tr><td>Superfície sob a carga</td><td>Coeficiente de atrito (μ) entre a carga e o piso, de 0,20 a 0,60. O tapete antiderrapante chega a μ 0,60.</td></tr>
+        </tbody>
+      </table></div>
+      <h3>O que o painel mostra</h3>
+      <ul>
+        <li><strong>Recomendação:</strong> total de cintas e de seções, e a opção com menos cintas.</li>
+        <li><strong>Opções comparadas:</strong> "como está", "com tapete antiderrapante", "com calços nos vãos" (vãos de até 40 cm ao longo do baú e 30 cm de folga lateral) e "tapete + calços".</li>
+        <li><strong>Cintas por seção:</strong> posição a partir do fundo, peso, altura, se a frente e as laterais estão travadas, número de cintas e o motivo.</li>
+        <li><strong>Avisos:</strong> usar cantoneiras nas arestas, volumes frágeis no topo, pilhas altas que podem tombar, alturas diferentes sob a mesma cinta (as pilhas mais baixas não ficam presas) e parede frontal sobrecarregada.</li>
+      </ul>
+      <h3>Método de cálculo</h3>
+      <p>Amarração por atrito, com a cinta passando por cima da carga, conforme a norma <strong>EN 12195-1</strong>: acelerações de projeto de 0,8 g para a frente e 0,5 g para trás e para os lados, com fator de segurança 1,1. A carga é dividida em seções transversais de até cerca de 2,5 m, cortadas entre volumes, com pelo menos uma cinta a cada 2 m.</p>
+      <ul>
+        <li>A parede frontal segura a carga encostada nela (ou encostada em carga que a toca) até 40% da carga útil, com máximo de 5.000 daN no baú (EN 12642 L); no contêiner, 40% da carga útil.</li>
+        <li>As paredes laterais seguram a carga que ocupa a largura toda.</li>
+        <li>Portas traseiras e plataformas não travam a carga.</li>
+      </ul>
+      <div class="note warn"><b class="t">Importante</b><p>O cálculo é uma ajuda de planejamento. Confira sempre com a Resolução CONTRAN nº 552/2015 e com a etiqueta das cintas, e verifique a tensão a cada parada.</p></div>
+    </section>
+
+    <!-- 14 -->
+    <section class="chapter" id="pdf" data-title="Ordem de carregamento e relatório">
+      <h2><span class="n">14</span>Ordem de carregamento e relatório</h2>
+      <h3>Ordem de carregamento (PDF)</h3>
+      <p>O botão <span class="ui">Ordem de carregamento (PDF)</span> gera, no próprio navegador, o documento para quem carrega o veículo e o abre numa nova aba, pronto para imprimir ou salvar. Se o navegador bloquear a nova aba, o arquivo é baixado.</p>
+      <figure style="max-width:520px">
+        <div class="shot"><img src="img/ordem-pdf.jpg" width="796" height="878" loading="lazy" alt="Capa da ordem de carregamento de um caminhão rígido 18 t, com a regra de carregamento, totais, imagem 3D e carga por eixo na saída."></div>
+        <figcaption>Capa da ordem de carregamento.</figcaption>
+      </figure>
+      <ul>
+        <li><strong>Sequência:</strong> sempre do <strong>fundo</strong> (a parede junto à cabine) para as <strong>portas</strong>. Um volume só entra depois dos volumes que ficam embaixo dele; entre os liberados, vai primeiro o mais ao fundo, depois o mais baixo, depois o da esquerda. A sequência é dividida em etapas de cerca de 1,25 m do comprimento, com até 12 volumes por etapa.</li>
+        <li><strong>Capa:</strong> veículo, data, a regra de carregamento, totais (volumes, peso, m³, comprimento usado, etapas e modo de planejamento), imagem 3D da carga completa, carga por eixo na saída e os avisos do plano, inclusive volumes que ficaram de fora.</li>
+        <li><strong>Cada etapa:</strong> imagem 3D vista das portas, com os volumes da etapa em laranja; planta e vista lateral em escala, com os já carregados em cinza e os da etapa coloridos e numerados; tabela com número, volume, cliente, medidas, peso, distância do fundo, altura, lado (esquerdo, centro, direito) e observações (girado, deitado, frágil, não empilhar).</li>
+        <li><strong>Amarração:</strong> com a amarração ligada, o documento inclui a página Plano de amarração.</li>
+        <li><strong>Fechamento:</strong> campos de assinatura para o responsável pelo carregamento e para o conferente. Todas as páginas trazem "Página X de N".</li>
+      </ul>
+      <div class="note info"><p>Sem WebGL, o documento sai sem as imagens 3D, mas com as plantas, as vistas laterais e as tabelas.</p></div>
+      <h3>Relatório</h3>
+      <p>O botão <span class="ui">Relatório</span> abre a impressão do navegador com o plano atual, sem os botões e formulários da tela. Para gerar um arquivo, escolha <em>Salvar como PDF</em> na janela de impressão.</p>
+    </section>
+
+    <!-- 15 -->
+    <section class="chapter" id="atalhos" data-title="Atalhos de teclado">
+      <h2><span class="n">15</span>Atalhos de teclado</h2>
+      <div class="table-wrap"><table>
+        <thead><tr><th>Tecla</th><th>Onde</th><th>Ação</th></tr></thead>
+        <tbody>
+          <tr><td><kbd>F1</kbd></td><td>Qualquer tela</td><td>Abre este manual numa nova aba.</td></tr>
+          <tr><td><kbd>Enter</kbd></td><td>Formulário da carga</td><td>Adiciona o item à lista.</td></tr>
+          <tr><td><kbd>Esc</kbd></td><td>Qualquer tela</td><td>Fecha o menu (no celular) e tira a seleção.</td></tr>
+          <tr><td><kbd>←</kbd> <kbd>→</kbd> <kbd>↑</kbd> <kbd>↓</kbd></td><td>Modo Manual, volume selecionado</td><td>Move o volume 100 mm.</td></tr>
+          <tr><td><kbd>Shift</kbd> + setas</td><td>Modo Manual, volume selecionado</td><td>Move o volume 10 mm.</td></tr>
+          <tr><td><kbd>R</kbd></td><td>Modo Manual, volume selecionado</td><td>Gira o volume 90°.</td></tr>
+        </tbody>
+      </table></div>
+    </section>
+
+    <!-- 16 -->
+    <section class="chapter" id="dados" data-title="Dados e privacidade">
+      <h2><span class="n">16</span>Dados e privacidade</h2>
+      <ul>
+        <li>O plano (lista, veículo, regras, modo, posições manuais e amarração), os espaços personalizados, as edições e os favoritos ficam salvos no armazenamento local do <strong>navegador</strong>, neste computador.</li>
+        <li>Nenhum dado é enviado para um servidor: o cálculo, o PDF e a leitura das planilhas acontecem no próprio navegador.</li>
+        <li>Outro navegador, outro computador ou uma janela anônima não enxergam os seus planos.</li>
+        <li>Limpar os dados de navegação (cookies e dados de sites) apaga os planos e os espaços personalizados.</li>
+      </ul>
+      <div class="note tip"><b class="t">Boa prática</b><p>Guarde a planilha de cada carga e o PDF da ordem de carregamento. Com a planilha, o plano pode ser refeito em qualquer computador, e a mesma lista sempre gera o mesmo plano.</p></div>
+    </section>
+
+    <!-- 17 -->
+    <section class="chapter" id="faq" data-title="Perguntas frequentes">
+      <h2><span class="n">17</span>Perguntas frequentes</h2>
+      <details class="faq"><summary>A vista 3D não aparece, só um desenho plano.</summary><div><p>O navegador está sem WebGL, ou a página foi aberta direto do disco (endereço começando com <code>file://</code>). Abra o sistema pelo endereço do servidor e confira se a aceleração de hardware está ligada nas configurações do navegador.</p></div></details>
+      <details class="faq"><summary>Alguns volumes ficaram "sem lugar". O que fazer?</summary><div><p>Leia o motivo no resumo do plano: peso, eixo, regras ou falta de espaço. Então escolha um veículo maior, aumente o tempo de otimização, permita que volumes deitem, revise o "Em cima kg" e o "Frágil", ou divida a carga em duas viagens.</p></div></details>
+      <details class="faq"><summary>Qual veículo devo usar para esta carga?</summary><div><p>Clique em <a href="#comparar">Comparar veículos</a>. O sistema planeja a carga em todos os espaços de carga e recomenda o menor que leva todos os volumes dentro dos limites de peso e de eixo.</p></div></details>
+      <details class="faq"><summary>Um eixo ficou vermelho, mas o peso total está abaixo da capacidade.</summary><div><p>A capacidade total não garante a distribuição. Volumes pesados concentrados na frente ou atrás sobrecarregam um eixo. No modo Automático o sistema já tenta corrigir; se não conseguir, mude a ordem das entregas, troque o veículo ou ajuste à mão no modo Manual.</p></div></details>
+      <details class="faq"><summary>O PDF não abriu.</summary><div><p>O navegador bloqueou a nova aba. Nesse caso o arquivo é baixado: procure na pasta de downloads, ou permita pop-ups para o endereço do sistema.</p></div></details>
+      <details class="faq"><summary>A planilha não foi lida.</summary><div><p>Confira se o arquivo é .xlsx ou .csv (o .xls antigo não é aceito), se os dados estão na primeira aba e se há colunas de comprimento, largura, altura, peso e quantidade. A mensagem informa o número das linhas ignoradas.</p></div></details>
+      <details class="faq"><summary>Por que o plano não muda quando clico em Carregar de novo?</summary><div><p>A mesma lista sempre gera o mesmo plano. Para buscar alternativas, aumente o tempo de otimização em Regras do plano, ou ajuste à mão no modo Manual.</p></div></details>
+      <details class="faq"><summary>Meus planos sumiram.</summary><div><p>Os planos ficam no navegador. Se os dados de navegação foram limpos, ou se você está em outro navegador, computador ou janela anônima, o plano não aparece. Importe a planilha da carga de novo.</p></div></details>
+      <details class="faq"><summary>As medidas do meu veículo são diferentes das do catálogo.</summary><div><p>Edite o espaço na aba Espaços de carga (é possível restaurar o original depois) ou crie um espaço personalizado com as medidas internas, os eixos e os limites do documento do veículo.</p></div></details>
+    </section>
+
+    <!-- 18 -->
+    <section class="chapter" id="glossario" data-title="Glossário">
+      <h2><span class="n">18</span>Glossário</h2>
+      <dl class="gloss">
+        <dt>Bitola</dt><dd>Distância entre os centros das rodas de um mesmo eixo.</dd>
+        <dt>Cantoneira</dt><dd>Proteção colocada na aresta da carga sob a cinta, para não marcar o volume nem cortar a cinta.</dd>
+        <dt>Centro de gravidade (CG)</dt><dd>Ponto onde se concentra o peso da carga. A posição dele define quanto peso vai para cada eixo.</dd>
+        <dt>CMT</dt><dd>Capacidade máxima de tração do cavalo mecânico.</dd>
+        <dt>Conjunto de eixos</dt><dd>Eixos próximos que dividem a carga entre si, como o conjunto duplo (tandem) ou o triplo.</dd>
+        <dt>daN</dt><dd>Decanewton, unidade de força das cintas. 1 daN equivale a cerca de 1 kgf.</dd>
+        <dt>Metro linear</dt><dd>Comprimento do piso ocupado pela carga, a partir da parede da frente.</dd>
+        <dt>Pino-rei</dt><dd>Pino do semirreboque que engata no prato do cavalo e transmite a ele parte do peso.</dd>
+        <dt>Prato (quinta roda)</dt><dd>Peça do cavalo mecânico onde o pino-rei do semirreboque se apoia.</dd>
+        <dt>PBT</dt><dd>Peso bruto total: a tara do veículo mais a carga.</dd>
+        <dt>PBTC</dt><dd>Peso bruto total combinado: cavalo mais semirreboque e carga.</dd>
+        <dt>STF</dt><dd>Força de tensão padrão da cinta com a catraca (<em>standard tension force</em>), em daN, informada na etiqueta.</dd>
+        <dt>Tara</dt><dd>Peso do veículo vazio sobre cada eixo.</dd>
+        <dt>μ (coeficiente de atrito)</dt><dd>Mede o quanto a carga escorrega no piso. Quanto maior, menos cintas são necessárias.</dd>
+      </dl>
+    </section>
+
+    <!-- 19 -->
+    <section class="chapter" id="suporte" data-title="Suporte">
+      <h2><span class="n">19</span>Suporte</h2>
+      <p>Dúvidas, sugestões ou problemas: escreva para <strong>gustavoflandal@gmail.com</strong>. Para agilizar, descreva o que estava fazendo, o veículo escolhido e, se possível, anexe a planilha da carga e o PDF da ordem de carregamento.</p>
+      <p class="foot">Syncrofin 3D Planner, desenvolvido por Gustavo F. Landal, 2026.<br><a class="back-top" href="#topo">Voltar ao início do manual</a></p>
+    </section>
+  </main>
+</div>
+
+<script>
+(function () {
+  var chapters = Array.prototype.slice.call(document.querySelectorAll('section.chapter'));
+
+  /* contents, built from the chapters so the two never disagree */
+  ['toc-list', 'toc-mobile-list'].forEach(function (id) {
+    var list = document.getElementById(id);
+    chapters.forEach(function (c) {
+      var li = document.createElement('li');
+      var a = document.createElement('a');
+      a.href = '#' + c.id;
+      a.textContent = c.dataset.title;
+      li.appendChild(a);
+      list.appendChild(li);
+    });
+  });
+  var mobile = document.querySelector('.toc-mobile');
+  document.getElementById('toc-mobile-list').addEventListener('click', function (e) {
+    if (e.target.closest('a')) mobile.open = false;
+  });
+
+  /* the chapter being read is marked in the contents */
+  var links = document.querySelectorAll('#toc-list a');
+  function mark(id) {
+    Array.prototype.forEach.call(links, function (a) {
+      a.classList.toggle('on', a.getAttribute('href') === '#' + id);
+    });
+  }
+  if ('IntersectionObserver' in window) {
+    var seen = {};
+    var io = new IntersectionObserver(function (entries) {
+      entries.forEach(function (en) { seen[en.target.id] = en.isIntersecting; });
+      for (var i = 0; i < chapters.length; i++) {
+        if (seen[chapters[i].id] && !chapters[i].hidden) { mark(chapters[i].id); break; }
+      }
+    }, { rootMargin: '-80px 0px -55% 0px' });
+    chapters.forEach(function (c) { io.observe(c); });
+  }
+
+  /* search: keeps only the chapters that mention every word typed */
+  var input = document.getElementById('search');
+  var count = document.getElementById('search-count');
+  var none = document.getElementById('no-results');
+  function norm(s) { return s.toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, ''); }
+  var texts = chapters.map(function (c) { return norm(c.textContent); });
+  input.addEventListener('input', function () {
+    var words = norm(input.value).split(/\s+/).filter(Boolean);
+    var shown = 0;
+    chapters.forEach(function (c, i) {
+      var hit = words.every(function (w) { return texts[i].indexOf(w) >= 0; });
+      c.hidden = !hit;
+      if (hit) shown++;
+      if (hit && words.length) c.querySelectorAll('details.faq').forEach(function (d) {
+        d.open = words.every(function (w) { return norm(d.textContent).indexOf(w) >= 0; });
+      });
+    });
+    count.textContent = words.length ? shown + (shown === 1 ? ' capítulo' : ' capítulos') : '';
+    none.style.display = words.length && !shown ? 'block' : 'none';
+    Array.prototype.forEach.call(document.querySelectorAll('.toc li, .toc-mobile li'), function (li) {
+      var c = document.querySelector(li.firstChild.getAttribute('href'));
+      li.hidden = c.hidden;
+    });
+  });
+
+  document.getElementById('print').addEventListener('click', function () { window.print(); });
+
+  /* opened from the planner with a chapter in the address: go there */
+  if (location.hash) {
+    var target = document.getElementById(location.hash.slice(1));
+    if (target) target.scrollIntoView();
+  }
+})();
+</script>
+</body>
+</html>

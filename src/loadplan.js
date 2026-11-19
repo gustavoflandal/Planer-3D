@@ -1286,7 +1286,67 @@
     };
   }
 
+  /* ------------------------------------------------ comparing cargo spaces --- */
+  /* How much of a vehicle a plan uses: shares (0..1) of its volume, payload
+     and floor, the length of floor used (mm), the boxes placed out of the
+     list, and the problems that break a limit (hard) or only warn (soft).
+     fits: the whole list went in and no limit is broken. */
+  function usage(vehicle, result) {
+    var t = result.totals;
+    var capacity = (vehicle.l * vehicle.w * vehicle.h) / 1e9;
+    var floor = (vehicle.l * vehicle.w) / 1e6;
+    var length = 0;
+    result.placed.forEach(function (b) {
+      length = Math.max(length, b.x + b.l);
+    });
+    var hard = 0;
+    var soft = 0;
+    ((result.check && result.check.problems) || []).forEach(function (p) {
+      if (p.hard) hard++;
+      else soft++;
+    });
+    return {
+      volume: capacity ? t.volume / capacity : 0,
+      weight: vehicle.payload ? t.weight / vehicle.payload : 0,
+      area: floor ? t.area / floor : 0,
+      length: length,
+      placed: t.count,
+      total: t.queue,
+      hard: hard,
+      soft: soft,
+      fits: t.queue > 0 && t.count === t.queue && hard === 0
+    };
+  }
+
+  /* Orders compared cargo spaces, best first. rows: [{ usage, ... }].
+     1. Those that take the whole list within every limit; among them, the
+        ones without warnings first, then the fullest (the larger share of
+        payload or of volume: the smallest vehicle that does the job), then
+        the shorter floor length.
+     2. Then the rest, by how many boxes they took, fewer broken limits and
+        how full they are. */
+  function rankSpaces(rows) {
+    var fill = function (u) {
+      return Math.max(u.volume, u.weight);
+    };
+    return rows.slice().sort(function (a, b) {
+      var ua = a.usage;
+      var ub = b.usage;
+      if (ua.fits !== ub.fits) return ua.fits ? -1 : 1;
+      if (ua.fits) {
+        if (!ua.soft !== !ub.soft) return ua.soft ? 1 : -1;
+        if (Math.abs(fill(ua) - fill(ub)) > 1e-9) return fill(ub) - fill(ua);
+        return ua.length - ub.length;
+      }
+      if (ua.placed !== ub.placed) return ub.placed - ua.placed;
+      if (ua.hard !== ub.hard) return ua.hard - ub.hard;
+      return fill(ub) - fill(ua);
+    });
+  }
+
   root.SyncrofinLoadPlan = {
+    usage: usage,
+    rankSpaces: rankSpaces,
     RULES: RULES,
     RULE_LIMITS: RULE_LIMITS,
     cleanRules: cleanRules,

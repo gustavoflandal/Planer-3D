@@ -95,7 +95,8 @@ const ids = [
   '#f-name', '#f-l', '#f-w', '#f-h', '#f-weight', '#f-qty', '#f-color', '#f-dest', '#f-orient', '#f-fragile', '#f-maxtop',
   '#axle-problems', '#axle-stops',
   '#plan', '#demo', '#clear', '#report', '#status', '#vehicle-dims',
-  '#axle-list', '#axle-cog', '#nav-toggle', '#topbar', '#import', '#import-file', '#template'
+  '#axle-list', '#axle-cog', '#nav-toggle', '#topbar', '#import', '#import-file', '#template',
+  '#compare', '#compare-panel', '#compare-reco', '#compare-table', '#compare-fav', '#compare-run', '#compare-close'
 ];
 const elements = {};
 for (const id of ids) {
@@ -768,6 +769,32 @@ try {
       const s = fp.sections[st.section - 1];
       return st.x >= s.from && st.x <= s.to && st.top > 0 && st.zmax > st.zmin;
     }) && fp.sections.every((s) => s.n >= Math.ceil((s.to - s.from) / 2000 - 1e-9))]);
+  /* the strap's path across the load: floor to floor over the top corners
+     (a tall stack, a lower box beside it, a gap to the right wall) */
+  const prof = [
+    { id: 1, name: 'Alta', x: 1000, y: 0, z: 0, l: 1200, w: 800, h: 1000, weight: 400, fragile: false, maxTop: Infinity },
+    { id: 2, name: 'Alta', x: 1000, y: 1000, z: 0, l: 1200, w: 800, h: 900, weight: 300, fragile: false, maxTop: Infinity },
+    { id: 3, name: 'Baixa', x: 1000, y: 0, z: 800, l: 1200, w: 800, h: 700, weight: 300, fragile: false, maxTop: Infinity }
+  ];
+  const pathPlan = Lash.plan(flat, prof, { surface: 'padrao', stf: 400 });
+  const pst = pathPlan.straps[0];
+  const path = pst && pst.path;
+  const under = (z) => {
+    /* the height of the path at z (it is a polyline over z) */
+    for (let i = 1; i < path.length; i++) {
+      const a = path[i - 1];
+      const b = path[i];
+      if (z >= a.z - 1e-6 && z <= b.z + 1e-6) return b.z === a.z ? Math.max(a.y, b.y) : a.y + ((b.y - a.y) * (z - a.z)) / (b.z - a.z);
+    }
+    return -1;
+  };
+  const corners = prof.flatMap((b) => [[b.z, b.y + b.h], [b.z + b.w, b.y + b.h]]);
+  checks.push(['lashing: each strap runs from the floor to the floor over the load', !!path && path.length >= 3 &&
+    path[0].y === 0 && path[path.length - 1].y === 0 && path.every((p, i) => i === 0 || p.z >= path[i - 1].z)]);
+  checks.push(['lashing: the strap rests on the top corners, never above the load as a flat roof', !!path &&
+    corners.every(([z, y]) => under(z) >= y - 1e-6) &&
+    path.some((p) => p.z === 1600 && p.y === 700) && path.some((p) => p.z === 0 && p.y === 1900) &&
+    under(1600) === 700]);
   const withLash = window.SyncrofinLoadDoc.build(Object.assign({}, data, { lash: full }));
   const lashText = Buffer.from(withLash.bytes).toString('latin1');
   checks.push(['PDF: securing page when the lashing is on', lashText.includes('(Plano de amarra\\347\\343o)') && withLash.pages >= doc.pages &&
@@ -776,6 +803,65 @@ try {
   const Pdf = window.SyncrofinPdf;
   checks.push(['PDF text width and wrapping', Math.abs(Pdf.textWidth('Ação', 10, false) - (667 + 500 + 556 + 556) / 100) < 0.01 &&
     Pdf.wrap('carregue sempre do fundo para as portas', 10, false, 80).every((l) => Pdf.textWidth(l, 10, false) <= 80)]);
+}
+
+{
+  /* "Comparar veículos": the ranking, a real comparison and the panel */
+  const P = window.SyncrofinLoadPlan;
+  const u = (o) => Object.assign({ volume: 0, weight: 0, area: 0, length: 0, placed: 10, total: 10, hard: 0, soft: 0, fits: true }, o);
+  const made = [
+    { id: 'big', usage: u({ volume: 0.3, weight: 0.3 }) },
+    { id: 'small', usage: u({ volume: 0.5, weight: 0.8 }) },
+    { id: 'warn', usage: u({ volume: 0.6, weight: 0.9, soft: 1 }) },
+    { id: 'over', usage: u({ volume: 0.7, weight: 0.95, hard: 1, fits: false }) },
+    { id: 'short', usage: u({ placed: 4, fits: false, volume: 0.9, weight: 1 }) }
+  ];
+  checks.push(['compare: whole load within limits first, without warnings first, fullest first, then the rest',
+    P.rankSpaces(made).map((r) => r.id).join() === 'small,big,warn,over,short']);
+
+  const list = Spaces.cargoSpaces();
+  const pick = (re) => list.find((s) => re.test(s.name));
+  const cands = [pick(/minifurg/i), pick(/r[ií]gido 18/i), pick(/^Cont[eê]iner 40 p[eé]s$/i)].filter(Boolean);
+  const pallets = [{ id: 1, name: 'Palete', l: 1200, w: 800, h: 1400, weight: 400, qty: 10, color: 'blue', dest: '' }];
+  const res = cands.map((s) => ({
+    space: s,
+    usage: P.usage(s, P.planSync({ vehicle: s, tractor: null, items: pallets, stops: P.stopOrder(pallets, []), mode: 'normal', rules: null }, 10))
+  }));
+  const ranked = P.rankSpaces(res);
+  checks.push(['compare: 4 t of pallets go in the rigid 18 t, not in the container or the small van', cands.length === 3 &&
+    /18/.test(ranked[0].space.name) && ranked[0].usage.fits && ranked[0].usage.placed === 10 &&
+    /minifurg/i.test(ranked[2].space.name) && !ranked[2].usage.fits]);
+  const u18 = ranked[0].usage;
+  checks.push(['compare: usage shares are of the vehicle', Math.abs(u18.weight - 4000 / ranked[0].space.payload) < 1e-6 &&
+    Math.abs(u18.volume - (10 * 1.2 * 0.8 * 1.4) / ((ranked[0].space.l * ranked[0].space.w * ranked[0].space.h) / 1e9)) < 1e-6]);
+
+  /* the panel, on the three favourites */
+  const textOf = (n) => (n ? String(n.textContent || '') + (n.children || []).map(textOf).join('') : '');
+  cands.forEach((s) => { if (!Spaces.isFavorite(s.id)) Spaces.toggleFavorite(s.id); });
+  elements['#demo'].click();
+  elements['#compare-fav'].checked = true;
+  elements['#compare'].click();
+  checks.push(['compare: the button opens the panel', elements['#compare-panel'].hidden === false &&
+    elements['#compare'].getAttribute('aria-expanded') === 'true' && /Comparando/.test(textOf(elements['#compare-reco']))]);
+  for (let i = 0; i < 400 && !/Recomendado|Nenhum veículo/.test(textOf(elements['#compare-reco'])); i++) await new Promise((r) => setTimeout(r, 25));
+  const tbody = elements['#compare-table'].children[1];
+  checks.push(['compare: the panel ranks the favourites and names the recommended one',
+    /Recomendado: .*18/.test(textOf(elements['#compare-reco'])) && tbody &&
+    tbody.children.length === Spaces.cargoSpaces().filter((s) => Spaces.isFavorite(s.id)).length && tbody.children.length >= 3 &&
+    /Recomendado/.test(textOf(tbody.children[0])) && /minifurg/i.test(textOf(tbody.children[tbody.children.length - 1]))]);
+  /* the yellow button: the plan switches to the recommended vehicle and the window closes */
+  const press = (data) => elements['#compare-panel'].fire('click', { target: { closest: () => ({ dataset: data }) } });
+  const before = String(elements['#vehicle-dims'].textContent);
+  press({ use: '0' });
+  checks.push(['compare: "Usar este veículo" closes the window and plans in the recommended vehicle',
+    elements['#compare-panel'].hidden === true && elements['#compare'].getAttribute('aria-expanded') === 'false' &&
+    /^Caminhão rígido 18 t/.test(String(elements['#vehicle-dims'].textContent)) && before !== String(elements['#vehicle-dims'].textContent)]);
+  /* "Cancelar": back to the planner, the vehicle as it was */
+  elements['#compare'].click();
+  const kept = String(elements['#vehicle-dims'].textContent);
+  press({ cancel: '1' });
+  checks.push(['compare: "Cancelar" closes the window and keeps the vehicle',
+    elements['#compare-panel'].hidden === true && String(elements['#vehicle-dims'].textContent) === kept]);
 }
 
 {
@@ -788,6 +874,25 @@ try {
   checks.push(['old saved plan opens on the same vehicle', String(elements['#vehicle-dims'].textContent).startsWith('Contêiner 20 pés ·')]);
   checks.push(['container shows no axle loads', elements['#axle-list'].children.length === 1 &&
     elements['#axle-list'].children[0].className === 'axle-none']);
+}
+
+{
+  /* help: the "?" button opens the manual, and the manual is whole */
+  const page = srcFile('index.html');
+  const help = srcFile('ajuda/index.html');
+  checks.push(['help button in the top bar opens the manual in a new tab',
+    /<a class="help-btn" id="help" href="ajuda\/index.html" target="_blank"/.test(page) &&
+    page.indexOf('id="help"') > page.indexOf('id="top-actions"') && page.indexOf('id="help"') < page.indexOf('</header>')]);
+  checks.push(['F1 opens the manual', srcFile('app.js').includes("e.key === 'F1'")]);
+  const ids = new Set([...help.matchAll(/\sid="([^"]+)"/g)].map((m) => m[1]));
+  const anchors = [...help.matchAll(/href="#([^"]+)"/g)].map((m) => m[1]);
+  checks.push(['manual: every internal link has a target', anchors.length > 0 && anchors.every((a) => ids.has(a))]);
+  const chapters = [...help.matchAll(/<section class="chapter" id="([^"]+)" data-title="([^"]+)"/g)];
+  checks.push(['manual: chapters are numbered in order', chapters.length >= 15 &&
+    chapters.every((c, i) => help.includes(`id="${c[1]}" data-title="${c[2]}">\n      <h2><span class="n">${i + 1}</span>`))]);
+  const imgs = [...help.matchAll(/src="(img\/[^"]+)"/g)].map((m) => m[1]);
+  checks.push(['manual: every picture is in src/ajuda/img', imgs.length > 0 &&
+    imgs.every((rel) => fs.existsSync(path.join(here, '..', 'src', 'ajuda', rel)))]);
 }
 
 let failed = 0;

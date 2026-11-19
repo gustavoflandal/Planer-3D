@@ -1331,9 +1331,10 @@ function render(view, selected) {
 
 /* ---------------------------------------------------------------- straps --- */
 /* The straps of the securing plan (lashing.js), top-over: from a lashing
-   point on the floor by the left wall, up the side of the load, over its
-   top and down to the right wall, with the ratchet on the right. Planner
-   mm: { x, top, zmin, zmax }. */
+   point on the floor by the left wall, up to the load, over the top corners
+   of the boxes (strap.path, the upper hull of the load at that x) and down
+   to the floor by the right wall, with the ratchet on the right. Planner
+   mm: { x, top, zmin, zmax, path: [{ z, y }] }. */
 function addStraps(group, straps, deck, W) {
   if (!straps || !straps.length) return;
   /* vivid red-orange, so the straps stand out on boxes of any colour */
@@ -1352,14 +1353,30 @@ function addStraps(group, straps, deck, W) {
     group.add(m);
   }
   straps.forEach((s) => {
-    const lift = 14; /* mm off the boxes */
-    const a = P(s.x, 0, 15);
-    const b = P(s.x, s.top + lift, Math.max(0, s.zmin - lift));
-    const c = P(s.x, s.top + lift, Math.min(W, s.zmax + lift));
-    const d = P(s.x, 0, W - 15);
-    piece(a, b);
-    piece(b, c);
-    piece(c, d);
+    const lift = 14; /* mm off the boxes, so the band sits on their corners */
+    let pts;
+    if (s.path && s.path.length >= 3) {
+      /* the corners are pushed up and outwards (away from the middle of the
+         load) by the lift; the floor points stay on the floor */
+      const mid = (s.path[0].z + s.path[s.path.length - 1].z) / 2;
+      pts = s.path.map((p, i) => {
+        if (i === 0 || i === s.path.length - 1) return P(s.x, 0, p.z);
+        const out = p.z < mid ? -lift : lift;
+        return P(s.x, p.y + lift, Math.min(W, Math.max(0, p.z + out)));
+      });
+    } else {
+      /* a plan saved before the path existed: over the highest box */
+      pts = [
+        P(s.x, 0, 15),
+        P(s.x, s.top + lift, Math.max(0, s.zmin - lift)),
+        P(s.x, s.top + lift, Math.min(W, s.zmax + lift)),
+        P(s.x, 0, W - 15)
+      ];
+    }
+    for (let i = 1; i < pts.length; i++) piece(pts[i - 1], pts[i]);
+    const a = pts[0];
+    const d = pts[pts.length - 1];
+    const c = pts[pts.length - 2];
     /* lashing points and the ratchet */
     [a, d].forEach((p) => {
       const ring = new THREE.Mesh(new THREE.BoxGeometry(0.07, 0.03, 0.05), dark);

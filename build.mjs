@@ -39,6 +39,13 @@ write('assets/loaddoc.js', read('loaddoc.js'));
 write('assets/scene3d.js', read('scene3d.js'));
 write('assets/vendor/three.module.min.js', read('vendor/three.module.min.js'));
 write('assets/vendor/THREE-LICENSE.txt', read('vendor/THREE-LICENSE.txt'));
+/* the user manual opened by the "?" button: src/ajuda/ copied as it is
+   (the page and its screenshots), so it is served at ajuda/index.html */
+const helpDir = path.join(src, 'ajuda');
+for (const name of fs.readdirSync(helpDir, { recursive: true })) {
+  const from = path.join(helpDir, name);
+  if (fs.statSync(from).isFile()) write(path.posix.join('ajuda', name.split(path.sep).join('/')), fs.readFileSync(from));
+}
 
 /* --- icon -----------------------------------------------------------------
    Built here rather than kept as a binary asset: a dark tile with the three
@@ -236,6 +243,12 @@ for (const rel of written.map((w) => w.split(' ')[0])) {
   if (!fs.existsSync(path.join(dist, rel))) problems.push(`missing after write: ${rel}`);
 }
 if (!html.includes('<canvas')) problems.push('index.html has no canvas for the 3D view');
+/* the "?" button must reach the manual, and the manual's pictures must exist */
+if (!html.includes('href="ajuda/index.html"')) problems.push('index.html has no help button linking ajuda/index.html');
+const helpHtml = read('ajuda/index.html');
+for (const m of helpHtml.matchAll(/src="(img\/[^"]+)"/g)) {
+  if (!fs.existsSync(path.join(dist, 'ajuda', m[1]))) problems.push(`manual image missing: ajuda/${m[1]}`);
+}
 if (!html.includes('<nav')) problems.push('index.html has no navigation landmark');
 if (!html.includes('<footer')) problems.push('index.html has no footer landmark');
 
