@@ -36,6 +36,9 @@
     <button class="btn ghost" id="clear" type="button">Limpar</button>
     <button class="btn primary" id="plan" type="button">Carregar</button>
   </div>
+
+  <a class="help-btn" id="help" href="ajuda/index.html" target="_blank" rel="noopener"
+    aria-label="Ajuda: abrir o manual do usuário" title="Ajuda (F1)"><span aria-hidden="true">?</span></a>
 </header>
 
 <main class="workspace" id="workspace">
@@ -228,10 +231,31 @@
       <span id="status">Pronto.</span>
       <span id="vehicle-dims"></span>
       <span class="foot-actions">
+        <button class="btn line small" id="compare" type="button" aria-expanded="false" aria-controls="compare-panel"
+          title="Planeja esta carga em cada espaço de carga e indica o mais adequado">Comparar veículos</button>
         <button class="btn primary small" id="load-order" type="button" title="Documento em PDF com a sequência de carregamento, do fundo para as portas">Ordem de carregamento (PDF)</button>
         <button class="btn line small" id="report" type="button">Relatório</button>
       </span>
     </div>
+
+    <section class="compare-panel" id="compare-panel" hidden>
+      <div class="compare-box" id="compare-box" role="dialog" aria-modal="true" aria-labelledby="compare-heading" tabindex="-1">
+      <div class="compare-head">
+        <h2 id="compare-heading">Comparar veículos</h2>
+        <label class="compare-fav"><input type="checkbox" id="compare-fav"> Só os favoritos</label>
+        <button class="btn line small" id="compare-run" type="button">Comparar de novo</button>
+        <button type="button" class="compare-close" id="compare-close" aria-label="Fechar a comparação" title="Fechar">×</button>
+      </div>
+      <div class="compare-reco" id="compare-reco" role="status"></div>
+      <div class="compare-wrap"><table class="compare-table" id="compare-table"></table></div>
+      <p class="compare-note">
+        Cada espaço de carga recebe a lista atual, no modo de planejamento e com as regras do plano, numa busca curta
+        (até 0,4 s por veículo). O recomendado leva todos os volumes sem passar de nenhum limite de peso ou de eixo e,
+        entre esses, é o que usa a maior parte da carga útil ou do volume: o menor veículo que dá conta. Os semirreboques
+        são planejados com o cavalo escolhido no plano.
+      </p>
+      </div>
+    </section>
 
     <section class="lash-panel" id="lash-panel" aria-label="Amarração da carga" hidden>
       <div class="lash-head">

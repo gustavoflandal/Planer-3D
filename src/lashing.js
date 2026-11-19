@@ -59,6 +59,7 @@
   var SIDE_TOUCH = 80; /* mm: free width with the load still held by the walls */
   var FILL_SIDE = 300; /* mm: free width a filler can close */
   var UNEVEN = 300; /* mm: a column this much lower than the one the strap rests on is not held */
+  var STRAP_ANCHOR = 15; /* mm from the side wall: the lashing points on the floor */
 
   function surfaceOf(id) {
     for (var i = 0; i < SURFACES.length; i++) if (SURFACES[i].id === id) return SURFACES[i];
@@ -208,6 +209,45 @@
     return { top: top, zmin: zmin, zmax: zmax, low: low };
   }
 
+  /* The strap's path across the load at x, as a tensioned strap lies on it:
+     from a lashing point on the floor by one side wall, straight to the
+     outermost top corner of the load, over the top corners (the upper hull
+     of the boxes' cross-section: it touches the corners and spans the dips,
+     never floating as a flat roof over lower boxes) and down to the floor
+     by the other wall. [{ z, y }] in mm, z growing; the ends have y = 0. */
+  function strapPath(placed, s, x, W) {
+    var topAt = {};
+    s.boxes.forEach(function (i) {
+      var b = placed[i];
+      if (!(b.x <= x && x <= b.x + b.l)) return;
+      var y = b.y + b.h;
+      [b.z, b.z + b.w].forEach(function (z) {
+        z = Math.round(z);
+        if (!(topAt[z] >= y)) topAt[z] = y;
+      });
+    });
+    var pts = Object.keys(topAt).map(Number).sort(function (a, b) {
+      return a - b;
+    }).map(function (z) {
+      return { z: z, y: topAt[z] };
+    });
+    if (!pts.length) return [];
+    /* upper hull, left to right (monotone chain) */
+    var hull = [];
+    pts.forEach(function (p) {
+      while (hull.length >= 2) {
+        var o = hull[hull.length - 2];
+        var a = hull[hull.length - 1];
+        if ((a.z - o.z) * (p.y - o.y) - (a.y - o.y) * (p.z - o.z) >= 0) hull.pop();
+        else break;
+      }
+      hull.push(p);
+    });
+    var left = { z: Math.min(STRAP_ANCHOR, hull[0].z), y: 0 };
+    var right = { z: Math.max(W - STRAP_ANCHOR, hull[hull.length - 1].z), y: 0 };
+    return [left].concat(hull, [right]);
+  }
+
   /* High, narrow stacks may tip over before they slide. */
   function tipping(placed, s, blockedFront, blockedSides) {
     var risk = [];
@@ -312,7 +352,10 @@
         var p = profileAt(placed, s, x);
         var uneven = p.top - p.low > UNEVEN;
         if (uneven) s.uneven = true;
-        result.straps.push({ x: Math.round(x), top: p.top, zmin: p.zmin, zmax: p.zmax, section: s.index, uneven: uneven });
+        result.straps.push({
+          x: Math.round(x), top: p.top, zmin: p.zmin, zmax: p.zmax, section: s.index, uneven: uneven,
+          path: strapPath(placed, s, x, W)
+        });
       }
     });
 

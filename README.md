@@ -35,6 +35,10 @@ Depois abra http://127.0.0.1:8080/.
 
 Os planos ficam salvos apenas no navegador (localStorage).
 
+## Ajuda
+
+O botão **?** no canto superior direito da barra (ou a tecla **F1**) abre o **manual do usuário** numa nova aba. O manual fica em `src/ajuda/index.html`, com as telas em `src/ajuda/img/`, e o build o copia para `dist/ajuda/`. Ele tem 19 capítulos (visão geral, primeiros passos, tela principal, lista de carga, importação, espaços de carga, otimização, modos de planejamento, regras, vistas, ajuste manual, peso por eixo, amarração, ordem de carregamento, atalhos, dados, perguntas frequentes, glossário e suporte), sumário lateral que marca o capítulo em leitura, busca por palavra e versão para impressão. Ao mudar um comportamento do app, atualize o capítulo correspondente.
+
 ## Espaços de carga
 
 O espaço de carga é o veículo ou contêiner onde a carga é posicionada.
@@ -107,6 +111,8 @@ O código está em `src/loadplan.js` (sem DOM). O problema é o carregamento de 
 - **Lista no modo manual:** ao acrescentar ou tirar itens, trocar o veículo ou as regras, os volumes já posicionados ficam onde estão e os que faltam são encaixados no espaço livre em volta deles. **Carregar** faz o mesmo com os volumes que ficaram de fora.
 - Voltar ao **Automático** refaz o plano (com confirmação se houve ajustes). O modo e as posições manuais ficam salvos com o plano. O ajuste manual usa a vista 3D (WebGL).
 
+**Comparar veículos.** O botão **Comparar veículos**, no rodapé da vista, planeja a lista atual em cada espaço de carga do catálogo (ou só nos favoritos), um depois do outro, com o mesmo modo e as mesmas regras e uma busca curta (até 0,4 s por veículo, `COMPARE_BUDGET` em `src/app.js`). O painel mostra volume, peso, chão, metro linear e volumes colocados de cada veículo, e o **recomendado**: o que leva toda a lista sem passar de nenhum limite (eixo, conjunto, pino-rei, peso bruto) e, entre esses, primeiro os sem avisos de distribuição e depois o mais cheio (maior fração da carga útil ou do volume), ou seja, o menor veículo que dá conta. A comparação abre numa janela sobre o planejador: o botão amarelo **Usar este veículo** (ou **Usar** numa linha) troca o veículo e volta ao plano; **Cancelar**, **Esc**, **×** ou um clique fora voltam ao plano sem mudar nada, para o operador escolher. Os semirreboques usam o cavalo do plano. A medida e a ordem ficam em `LoadPlan.usage` e `LoadPlan.rankSpaces` (`src/loadplan.js`).
+
 **Ordem de carregamento (PDF).** O botão **Ordem de carregamento (PDF)**, ao lado de Relatório, gera um documento para quem carrega o veículo e o abre numa nova aba, pronto para imprimir ou salvar. Se o navegador bloquear a aba, o arquivo é baixado.
 
 - **Sequência:** sempre do **fundo** (a parede junto à cabine) para as **portas**. Um volume só entra depois dos volumes que ficam embaixo dele; entre os liberados vai primeiro o mais ao fundo, depois o mais baixo, depois o da esquerda. A sequência é dividida em etapas de cerca de 1,25 m do comprimento (no máximo 12 volumes por etapa).
@@ -115,7 +121,7 @@ O código está em `src/loadplan.js` (sem DOM). O problema é o carregamento de 
 - No fim, campos de assinatura para o responsável pelo carregamento e o conferente; todas as páginas trazem "Página X de N".
 - O PDF é gerado no próprio navegador por `src/pdfwriter.js` (sem bibliotecas), e o documento é montado por `src/loaddoc.js`. Sem WebGL, o documento sai sem as imagens 3D, com as plantas, as vistas laterais e as tabelas.
 
-**Amarração.** O botão **Amarração**, na barra da vista, calcula as cintas que a carga planejada precisa, desenha-as em 3D sobre a carga (laranja, com pontos de amarração e catraca) e abre o painel de amarração. Com ele ligado, a ordem de carregamento em PDF ganha a página "Plano de amarração".
+**Amarração.** O botão **Amarração**, na barra da vista, calcula as cintas que a carga planejada precisa, desenha-as em 3D sobre a carga (laranja, com pontos de amarração e catraca: cada cinta sai do piso junto a uma parede, passa pelas quinas superiores dos volumes, o envoltório convexo superior da seção da carga naquele ponto, calculado em `strapPath` de `src/lashing.js`, e desce até o piso do outro lado) e abre o painel de amarração. Com ele ligado, a ordem de carregamento em PDF ganha a página "Plano de amarração".
 
 - **Método:** amarração por atrito, com a cinta passando por cima da carga, da EN 12195-1. As acelerações de projeto são 0,8 g para a frente e 0,5 g para trás e para os lados, com fator de segurança 1,1. Por seção: n ≥ (c − μ)·m·g·1,1 / (2·μ·sen α·STF), em que α é o ângulo da cinta com o piso, calculado pela altura da carga e pela distância até o ponto de amarração.
 - **Seções:** a carga é dividida em seções transversais de até cerca de 2,5 m, cortadas entre volumes, com pelo menos uma cinta a cada 2 m.

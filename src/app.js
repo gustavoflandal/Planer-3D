@@ -1232,6 +1232,7 @@
     sceneDirty = true;
     draw();
     notifyPlan();
+    if (compare.open) renderCompare(); /* the vehicle in use, or an out-of-date table */
   }
 
   function runPlan() {
@@ -2422,6 +2423,15 @@
     });
 
     document.addEventListener('keydown', function (e) {
+      /* F1 opens the user manual, like the "?" button in the bar */
+      if (e.key === 'F1') {
+        var help = $('#help');
+        if (help) {
+          e.preventDefault();
+          window.open(help.getAttribute('href'), '_blank', 'noopener');
+        }
+        return;
+      }
       if (manualKey(e)) return;
       if (e.key !== 'Escape') return;
       setMenu(false);
@@ -2639,6 +2649,321 @@
     }
   }
 
+  /* ---------------------------------------------------- compare vehicles --- */
+  /* "Comparar veículos": the list on screen is planned in every cargo space
+     (or only the favourites), one after the other with a short search each,
+     and the spaces are ranked by LoadPlan.rankSpaces — the recommended one
+     takes the whole load within every limit and is the fullest, the smallest
+     vehicle that does the job. "Usar" switches the plan to that space. */
+  var COMPARE_BUDGET = 0.4; /* seconds of search per vehicle */
+  var compare = { open: false, rows: [], total: 0, sig: '', job: null };
+
+  /* what the comparison depends on: when it changes the table is out of date */
+  function compareSig() {
+    return JSON.stringify([state.items, state.mode, LoadPlan.cleanRules(state.rules), LoadPlan.stopOrder(state.items, state.stops), state.tractorId]);
+  }
+
+  /* semitrailers are compared with the tractor chosen for the plan ('' = none) */
+  function compareTractor(space) {
+    if (!Spaces.takesTractor(space) || !state.tractorId) return null;
+    var t = Spaces.get(state.tractorId);
+    return t && Spaces.isTractor(t) ? t : null;
+  }
+
+  function stopCompare() {
+    if (compare.job) {
+      compare.job.stopped = true;
+      if (compare.job.cancel) compare.job.cancel();
+    }
+    compare.job = null;
+  }
+
+  function runCompare() {
+    stopCompare();
+    var spaces = Spaces.cargoSpaces();
+    if (els.compareFav && els.compareFav.checked) {
+      spaces = spaces.filter(function (s) {
+        return Spaces.isFavorite(s.id);
+      });
+    }
+    compare.rows = [];
+    compare.total = spaces.length;
+    compare.sig = compareSig();
+    if (!state.items.length || !spaces.length) {
+      renderCompare();
+      return;
+    }
+    var rules = LoadPlan.cleanRules(state.rules);
+    rules.budget = Math.min(rules.budget, COMPARE_BUDGET);
+    var stops = LoadPlan.stopOrder(state.items, state.stops);
+    var job = { stopped: false, cancel: null };
+    compare.job = job;
+    var i = 0;
+    function next() {
+      if (job.stopped) return;
+      if (i >= spaces.length) {
+        compare.job = null;
+        renderCompare();
+        return;
+      }
+      var space = spaces[i++];
+      var tractor = compareTractor(space);
+      var finished = false;
+      var done = function (best) {
+        if (finished || job.stopped) return;
+        finished = true;
+        job.cancel = null;
+        compare.rows.push({ space: space, tractor: tractor, usage: LoadPlan.usage(space, best) });
+        renderCompare();
+        window.setTimeout(next, 0);
+      };
+      var input = { vehicle: space, tractor: tractor, items: state.items, stops: stops, mode: state.mode, rules: rules };
+      var search = LoadPlan.start(input, function (best, progress) {
+        if (progress.done) done(best);
+      });
+      if (search.running()) job.cancel = search.cancel;
+      else done(search.best);
+    }
+    renderCompare();
+    window.setTimeout(next, 0);
+  }
+
+  function pct(share) {
+    return Math.round(share * 100) + '%';
+  }
+
+  function meterCell(tr, share, kind) {
+    var td = document.createElement('td');
+    var m = document.createElement('span');
+    m.className = 'cmp-meter ' + kind;
+    var b = document.createElement('b');
+    b.textContent = pct(share);
+    var bar = document.createElement('i');
+    var fillEl = document.createElement('span');
+    if (fillEl.style) fillEl.style.width = clamp(share * 100, 0, 100).toFixed(1) + '%';
+    bar.appendChild(fillEl);
+    m.appendChild(b);
+    m.appendChild(bar);
+    td.appendChild(m);
+    tr.appendChild(td);
+  }
+
+  function spaceLabel(row) {
+    return row.space.name + (row.tractor ? ' + ' + row.tractor.name : '');
+  }
+
+  function isCurrent(row) {
+    return row.space.id === state.spaceId;
+  }
+
+  function renderCompare() {
+    if (!els.compareTable || !els.compareReco) return;
+    var ranked = LoadPlan.rankSpaces(compare.rows);
+    var running = !!compare.job;
+    var best = !running && ranked.length && ranked[0].usage.fits ? ranked[0] : null;
+    var stale = compare.rows.length > 0 && compare.sig !== compareSig();
+
+    /* the line that answers the question */
+    var reco = els.compareReco;
+    reco.innerHTML = '';
+    reco.className = 'compare-reco';
+    var text = document.createElement('p');
+    reco.appendChild(text);
+    if (!state.items.length) {
+      text.textContent = 'A lista de carga está vazia: adicione volumes para comparar os veículos.';
+    } else if (!compare.total) {
+      text.textContent = 'Nenhum favorito marcado. Marque veículos com ★ na lista de espaços de carga ou desmarque "Só os favoritos".';
+    } else if (running) {
+      reco.className += ' busy';
+      text.textContent = 'Comparando… ' + compare.rows.length + ' de ' + compare.total + ' veículos planejados.';
+      var prog = document.createElement('span');
+      prog.className = 'cmp-progress';
+      var pf = document.createElement('i');
+      if (pf.style) pf.style.width = ((compare.rows.length / compare.total) * 100).toFixed(1) + '%';
+      prog.appendChild(pf);
+      reco.appendChild(prog);
+    } else if (best) {
+      var u = best.usage;
+      reco.className += ' ok';
+      var lead = document.createElement('span');
+      lead.textContent = 'Recomendado: ';
+      var strong = document.createElement('strong');
+      strong.textContent = spaceLabel(best);
+      var why = document.createElement('span');
+      why.textContent = '. Leva os ' + u.total + ' volumes sem passar de nenhum limite, usando ' + pct(u.weight) + ' da carga útil e ' +
+        pct(u.volume) + ' do volume' + (u.soft ? ', com avisos de distribuição: confira o peso por eixo.' : '.');
+      text.appendChild(lead);
+      text.appendChild(strong);
+      text.appendChild(why);
+      if (isCurrent(best)) {
+        var cur = document.createElement('span');
+        cur.className = 'cmp-current';
+        cur.textContent = 'É o veículo do plano.';
+        reco.appendChild(cur);
+      }
+    } else if (ranked.length) {
+      reco.className += ' bad';
+      var top = ranked[0];
+      text.textContent = 'Nenhum veículo comparado leva toda a carga dentro dos limites. O que leva mais é ' + spaceLabel(top) +
+        ', com ' + top.usage.placed + ' de ' + top.usage.total + ' volumes' + (top.usage.hard ? ' e limites ultrapassados' : '') +
+        '. Divida a carga em mais de uma viagem ou cadastre um veículo maior.';
+    }
+    if (stale && !running) {
+      var note = document.createElement('p');
+      note.className = 'cmp-stale';
+      note.textContent = 'A lista, o modo ou as regras mudaram desde a comparação. Clique em "Comparar de novo" para atualizar.';
+      reco.appendChild(note);
+    }
+
+    /* the two ways out: take the recommended vehicle, or cancel and choose in
+       the planner */
+    var acts = document.createElement('div');
+    acts.className = 'compare-actions';
+    if (best && !isCurrent(best)) {
+      var use = document.createElement('button');
+      use.type = 'button';
+      use.className = 'btn primary';
+      use.textContent = 'Usar este veículo';
+      use.dataset.use = String(ranked.indexOf(best));
+      acts.appendChild(use);
+    }
+    var cancel = document.createElement('button');
+    cancel.type = 'button';
+    cancel.className = 'btn line';
+    cancel.dataset.cancel = '1';
+    cancel.textContent = best && isCurrent(best) ? 'Voltar ao plano' : 'Cancelar';
+    cancel.title = 'Volta ao plano de carga sem trocar o veículo';
+    acts.appendChild(cancel);
+    reco.appendChild(acts);
+
+    /* the table */
+    var table = els.compareTable;
+    table.innerHTML = '';
+    if (!ranked.length) return;
+    var head = document.createElement('tr');
+    ['Veículo', 'Volume', 'Peso', 'Chão', 'Linear', 'Volumes', ''].forEach(function (h) {
+      cell(head, 'th', h);
+    });
+    var thead = document.createElement('thead');
+    thead.appendChild(head);
+    table.appendChild(thead);
+    var body = document.createElement('tbody');
+    ranked.forEach(function (row, idx) {
+      var u = row.usage;
+      var tr = document.createElement('tr');
+      if (row === best) tr.className = 'best';
+      var name = document.createElement('td');
+      name.className = 'veh';
+      var strong = document.createElement('strong');
+      strong.textContent = spaceLabel(row);
+      name.appendChild(strong);
+      if (isCurrent(row)) {
+        var tag = document.createElement('span');
+        tag.className = 'cmp-tag';
+        tag.textContent = 'no plano';
+        name.appendChild(tag);
+      }
+      var dims = document.createElement('small');
+      dims.textContent = fmt(row.space.l) + ' × ' + fmt(row.space.w) + ' × ' + fmt(row.space.h) + ' mm · ' + fmt(row.space.payload) + ' kg';
+      name.appendChild(dims);
+      tr.appendChild(name);
+      meterCell(tr, u.volume, 'm-volume');
+      meterCell(tr, u.weight, u.weight > 1 ? 'm-over' : 'm-weight');
+      meterCell(tr, u.area, 'm-area');
+      cell(tr, 'td', fmt(u.length / 1000, 2) + ' m', 'num');
+      var res = document.createElement('td');
+      var chip = document.createElement('span');
+      if (row === best) {
+        chip.className = 'cmp-chip best';
+        chip.textContent = 'Recomendado';
+      } else if (u.fits) {
+        chip.className = 'cmp-chip ' + (u.soft ? 'warn' : 'ok');
+        chip.textContent = u.placed + ' de ' + u.total + (u.soft ? ' · avisos' : '');
+      } else {
+        chip.className = 'cmp-chip bad';
+        chip.textContent = u.placed + ' de ' + u.total + (u.placed === u.total && u.hard ? ' · acima do limite' : '');
+      }
+      res.appendChild(chip);
+      tr.appendChild(res);
+      var act = document.createElement('td');
+      act.className = 'act';
+      var b = document.createElement('button');
+      b.type = 'button';
+      b.className = 'btn line small';
+      if (isCurrent(row)) {
+        b.textContent = 'Em uso';
+        b.disabled = true;
+      } else {
+        b.textContent = 'Usar';
+        b.dataset.use = String(idx);
+        b.setAttribute('aria-label', 'Usar ' + spaceLabel(row));
+      }
+      act.appendChild(b);
+      tr.appendChild(act);
+      body.appendChild(tr);
+    });
+    table.appendChild(body);
+    compare.ranked = ranked;
+  }
+
+  function setCompareOpen(open) {
+    compare.open = open;
+    if (els.comparePanel) els.comparePanel.hidden = !open;
+    if (els.compare) {
+      els.compare.setAttribute('aria-expanded', open ? 'true' : 'false');
+      els.compare.classList.toggle('on', open);
+    }
+    if (!open) {
+      stopCompare();
+      if (els.compare && els.compare.focus) els.compare.focus();
+      return;
+    }
+    if (!compare.rows.length || compare.sig !== compareSig()) runCompare();
+    else renderCompare();
+    var box = $('#compare-box');
+    if (box && box.focus) box.focus();
+  }
+
+  /* Leaves the comparison for the planner: with the chosen vehicle (row
+     index in the ranking) or, without one, as the plan was. */
+  function leaveCompare(rowIndex) {
+    var row = rowIndex === undefined || !compare.ranked ? null : compare.ranked[rowIndex];
+    setCompareOpen(false);
+    if (row) selectSpace(row.space.id, row.tractor ? row.tractor.id : undefined);
+    if (els.canvas && els.canvas.scrollIntoView) els.canvas.scrollIntoView({ block: 'center' });
+  }
+
+  function wireCompare() {
+    els.compare = $('#compare');
+    els.comparePanel = $('#compare-panel');
+    els.compareReco = $('#compare-reco');
+    els.compareTable = $('#compare-table');
+    els.compareFav = $('#compare-fav');
+    if (!els.compare || !els.comparePanel) return;
+    els.compare.addEventListener('click', function () {
+      setCompareOpen(!compare.open);
+    });
+    var close = $('#compare-close');
+    if (close) close.addEventListener('click', function () {
+      leaveCompare();
+    });
+    var again = $('#compare-run');
+    if (again) again.addEventListener('click', runCompare);
+    if (els.compareFav) els.compareFav.addEventListener('change', runCompare);
+    els.comparePanel.addEventListener('click', function (e) {
+      if (e.target === els.comparePanel) {
+        leaveCompare(); /* a click outside the window cancels */
+        return;
+      }
+      var hit = e.target.closest && e.target.closest('[data-use], [data-cancel]');
+      if (!hit) return;
+      leaveCompare(hit.dataset.use !== undefined ? parseInt(hit.dataset.use, 10) : undefined);
+    });
+    document.addEventListener('keydown', function (e) {
+      if (e.key === 'Escape' && compare.open) leaveCompare();
+    });
+  }
+
   function init() {
     cacheEls();
     if (!els.canvas || !els.items) return;
@@ -2657,6 +2982,7 @@
     fillLash();
 
     wireUi();
+    wireCompare();
     wireCanvas();
     runPlan();
     setView('3d');
