@@ -887,9 +887,12 @@ try {
   const ids = new Set([...help.matchAll(/\sid="([^"]+)"/g)].map((m) => m[1]));
   const anchors = [...help.matchAll(/href="#([^"]+)"/g)].map((m) => m[1]);
   checks.push(['manual: every internal link has a target', anchors.length > 0 && anchors.every((a) => ids.has(a))]);
-  const chapters = [...help.matchAll(/<section class="chapter" id="([^"]+)" data-title="([^"]+)"/g)];
+  /* the chapter number right after each section's opening tag; whitespace in
+     between is free (a Windows checkout with core.autocrlf writes CRLF) */
+  const chapters = [...help.matchAll(/<section class="chapter" id="([^"]+)" data-title="([^"]+)">\s*<h2><span class="n">(\d+)<\/span>/g)];
   checks.push(['manual: chapters are numbered in order', chapters.length >= 15 &&
-    chapters.every((c, i) => help.includes(`id="${c[1]}" data-title="${c[2]}">\n      <h2><span class="n">${i + 1}</span>`))]);
+    chapters.length === (help.match(/<section class="chapter"/g) || []).length &&
+    chapters.every((c, i) => Number(c[3]) === i + 1)]);
   const imgs = [...help.matchAll(/src="(img\/[^"]+)"/g)].map((m) => m[1]);
   checks.push(['manual: every picture is in src/ajuda/img', imgs.length > 0 &&
     imgs.every((rel) => fs.existsSync(path.join(here, '..', 'src', 'ajuda', rel)))]);
